@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <vector>
@@ -68,24 +69,24 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
   int pid = i32_from_le({buffer[0], buffer[1], buffer[2], buffer[3]});
   int type = i32_from_le({buffer[4], buffer[5], buffer[6], buffer[7]});
 
-  Packet responsePacket{};
+  Packet response{};
   if (!client->connected) {
     // Check if the max client capacity has been reached
     if (this->clients.size() >= this->MAXCLIENTS) {
-      responsePacket = create_packet(-3, DATAKIND::CONN, "server is full");
+      response = create_packet(-3, DATAKIND::CONN, "server is full");
       std::cout << "server max capacity has been reached" << std::endl;
-      client->send_packet(responsePacket);
+      client->send_packet(response);
       return -1;
     }
 
     if (type != DATAKIND::CONN) {
-      responsePacket = create_packet(-1, DATAKIND::CONN, "");
+      response = create_packet(-1, DATAKIND::CONN, "");
     } else {
       // Right now CONN only sets the client's username without any
       // authentication I'll decide if I want to expand it into an actual
       // authentication system
       if (packetBody.size() > 14) {
-        responsePacket = create_packet(-2, DATAKIND::CONN, "");
+        response = create_packet(-2, DATAKIND::CONN, "");
       } else {
         // username example: bunny@23
         std::ostringstream username;
@@ -93,13 +94,42 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
         std::string usernameStr = username.str();
         client->username = usernameStr;
         this->identifiers.fetch_add(1);
-        responsePacket = create_packet(pid, DATAKIND::CONN, usernameStr);
+        response = create_packet(pid, DATAKIND::CONN, usernameStr);
       }
+    }
+  } else {
+    switch (type) {
+    case DATAKIND::JOIN: {
+      auto ch = this->channels.find(packetBody);
+      // does the channel exist ?
+      if (ch == channels.end()) {
+        // if it doesn't, can you create it ?
+        if (this->channels.size() < this->MAXCHANNELS) {
+          auto nch = Channel::create_channel(client, packetBody);
+          std::string info = nch.info();
+          this->channels.emplace(nch.name, nch);
+          response = create_packet(pid, DATAKIND::JOIN, info);
+        } else {
+          response = create_packet(-1, DATAKIND::JOIN, "channel limit reached");
+        }
+      } else {
+        auto channel = ch->second;
+        // if it does, is there capacity for you to join ?
+        if (channel->chatters.size() < channel->MAXCAPACITY) {
+          if (channel->join(client) > 0) {
+            std::string info = channel->info();
+            response = create_packet(pid, DATAKIND::JOIN, info);
+          };
+        } else {
+          response = create_packet(-1, DATAKIND::JOIN, "channel full");
+        }
+      }
+    }
     }
   }
 
-  if (responsePacket.size > 0) {
-    client->send_packet(responsePacket);
+  if (response.size > 0) {
+    client->send_packet(response);
   }
 
   return 0;

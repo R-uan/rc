@@ -14,6 +14,7 @@
 
 struct Client {
   int fd;
+  std::mutex mtx;
   std::string username;
   std::atomic_bool connected{false};
   std::vector<std::string> channels{};
@@ -34,8 +35,9 @@ typedef std::shared_ptr<Client> Chatter;
 struct Channel {
   // 1 : public
   // 2 : private
-  int mode;
+  int mode{2};
   std::mutex mtx;
+  int MAXCAPACITY{50};
   // channel name should start with `#` ex: #general
   std::string name;
   // whoever joins it first becomes the emperor
@@ -43,8 +45,13 @@ struct Channel {
   // the role. If no moderator is available to become the emperor the channel is
   // destroyed.
   Chatter emperor;
-  std::vector<Chatter> chatters;
-  std::array<Chatter, 5> moderator;
+  std::vector<Chatter> chatters{};
+  std::array<Chatter, 5> moderator{};
+
+  // returns relevant info about the channel (name, mode, emperor, moderators,
+  // chatters) need. to figure out the formatting
+  std::string info();
+
   // only available if mode is public
   int join(Chatter client);
   void leave(Chatter client);
@@ -65,6 +72,8 @@ struct Channel {
   int kick_chatter(Chatter mod, std::string_view target);
   int invite_chatter(Chatter mod, std::string_view target);
 
+  Channel(std::string_view name, Chatter creator)
+      : name(name), emperor(creator) {}
   static Channel create_channel(Chatter client, std::string name);
 };
 

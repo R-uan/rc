@@ -1,4 +1,5 @@
 #include "relay_chat.hpp"
+#include <mutex>
 #include <sys/socket.h>
 
 bool Client::send_packet(Packet packet) {
@@ -18,4 +19,23 @@ std::optional<Chatter> Channel::find_chatter(std::string username) {
   }
 
   return std::nullopt;
+}
+
+int Channel::join(Chatter chatter) {
+  {
+    std::unique_lock lock(chatter->mtx);
+    chatter->channels.push_back(this->name);
+  }
+  {
+    std::unique_lock lock(this->mtx);
+    this->chatters.push_back(chatter);
+  }
+  return this->chatters.size();
+}
+
+Channel create_channel(Chatter client, std::string name) {
+  if (name[0] != '#') {
+    name = '#' + name;
+  }
+  return Channel(name, client);
 }

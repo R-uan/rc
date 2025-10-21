@@ -21,16 +21,17 @@ private:
 
   // server capacity
   const int MAXCLIENTS;
+  const int MAXCHANNELS;
   // used in the creation of username to guarantee uniqueness
   std::atomic_int identifiers;
 
   std::mutex epollMtx;
   std::mutex serverMtx;
 
-  // channel keys should start with `#`, ex: #general
-  std::unordered_map<std::string, Channel> channels;
   // client keys are their file descriptor
   std::unordered_map<int, std::shared_ptr<Client>> clients;
+  // channel keys should start with `#`, ex: #general
+  std::unordered_map<std::string, std::shared_ptr<Channel>> channels;
 
   int read_size(std::shared_ptr<Client> client);
   int read_incoming(std::shared_ptr<Client> client);
@@ -38,7 +39,7 @@ private:
   void add_client(int fd);
   void rmv_client(std::shared_ptr<Client> client);
 
-  RcServer(int max) : MAXCLIENTS(max) {
+  RcServer(int mcl, int mch) : MAXCLIENTS(mcl), MAXCHANNELS(mch) {
     this->serverFd = socket(AF_INET, SOCK_STREAM, 0);
     if (this->serverFd == -1) {
       std::cerr << "Could not create server socket" << std::endl;
