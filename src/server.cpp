@@ -105,9 +105,9 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
       if (ch == channels.end()) {
         // if it doesn't, can you create it ?
         if (this->channels.size() < this->MAXCHANNELS) {
-          auto nch = Channel::create_channel(client, packetBody);
-          std::string info = nch.info();
-          this->channels.emplace(nch.name, nch);
+          auto nch = std::make_shared<Channel>(client, packetBody);
+          std::string info = nch->info();
+          this->channels.emplace(nch->name, nch);
           response = create_packet(pid, DATAKIND::JOIN, info);
         } else {
           response = create_packet(-1, DATAKIND::JOIN, "channel limit reached");
@@ -150,12 +150,10 @@ void RcServer::add_client(int fd) {
   epoll_event event;
   event.data.fd = fd;
   event.events = EPOLLIN | EPOLLONESHOT;
-
   {
     std::unique_lock lock(this->epollMtx);
     epoll_ctl(this->epollFd, EPOLL_CTL_ADD, fd, &event);
   }
-
   auto client = std::make_shared<Client>(fd);
   this->clients[fd] = std::move(client);
 }
