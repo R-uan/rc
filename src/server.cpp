@@ -65,7 +65,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
     return -1;
   }
 
-  std::string packetBody(&buffer[8], &buffer[buffer.size() - 2]);
+  std::vector<uint8_t> packetBody(&buffer[8], &buffer[buffer.size() - 2]);
   int pid = i32_from_le({buffer[0], buffer[1], buffer[2], buffer[3]});
   int type = i32_from_le({buffer[4], buffer[5], buffer[6], buffer[7]});
 
@@ -82,48 +82,14 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
     if (type != DATAKIND::CONN) {
       response = create_packet(-1, DATAKIND::CONN, "");
     } else {
-      // Right now CONN only sets the client's username without any
-      // authentication I'll decide if I want to expand it into an actual
-      // authentication system
-      if (packetBody.size() > 14) {
-        response = create_packet(-2, DATAKIND::CONN, "");
-      } else {
-        // username example: bunny@23
-        std::ostringstream username;
-        username << packetBody << "@" << this->identifiers;
-        std::string usernameStr = username.str();
-        client->username = usernameStr;
-        this->identifiers.fetch_add(1);
-        response = create_packet(pid, DATAKIND::CONN, usernameStr);
-      }
     }
   } else {
     switch (type) {
+    // to join a channel the following conditions must be met
+    // - the channel should not be at max capacity
+    // - if the channel is secret, the client must provide a token
+    // - if the channel does not exist it may be created
     case DATAKIND::JOIN: {
-      auto ch = this->channels.find(packetBody);
-      // does the channel exist ?
-      if (ch == channels.end()) {
-        // if it doesn't, can you create it ?
-        if (this->channels.size() < this->MAXCHANNELS) {
-          auto nch = std::make_shared<Channel>(client, packetBody);
-          std::string info = nch->info();
-          this->channels.emplace(nch->name, nch);
-          response = create_packet(pid, DATAKIND::JOIN, info);
-        } else {
-          response = create_packet(-1, DATAKIND::JOIN, "channel limit reached");
-        }
-      } else {
-        auto channel = ch->second;
-        // if it does, is there capacity for you to join ?
-        if (channel->chatters.size() < channel->MAXCAPACITY) {
-          if (channel->join(client) > 0) {
-            std::string info = channel->info();
-            response = create_packet(pid, DATAKIND::JOIN, info);
-          };
-        } else {
-          response = create_packet(-1, DATAKIND::JOIN, "channel full");
-        }
-      }
     }
     }
   }
@@ -133,6 +99,49 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
   }
 
   return 0;
+}
+
+// # The JOIN packet payload (body) will be composed of
+// ## <flag> \n <channel> \n <token>
+// ### <flag>    : should create channel if does not exist.
+// ### <channel> : target channel's name to join.
+// ### <token>   : optional: needed if the server is secret.
+Packet RcServer::handle_join(std::shared_ptr<Client> client, Request &request) {
+  auto partitions = split_newline(request.payload);
+  if (partitions.size() < 2 || partitions.size() > 3) {
+    return create_packet(-1, DATAKIND::JOIN, "invalid packet");
+  }
+
+  bool flag = partitions[0][0] == 1;
+  std::string channelName(partitions[1].begin(), partitions[1].end());
+
+  auto it = this->channels.find(channelName);
+  if (it == this->channels.end()) {
+    if (!flag || this->channels.size() == this->MAXCHANNELS) {
+      return create_packet(-1, DATAKIND::JOIN, "does not exist");
+    } else {
+      Channel newChannel(channelName, client);
+      std::string channelInfo(newChannel.info());
+      this->channels.emplace(channelName, newChannel);
+      return create_packet(request.id, DATAKIND::JOIN, channelInfo);
+    }
+  } else {
+    auto channel = it->second;
+    std::string invitationToken{};
+    if (partitions.size() == 3)
+      invitationToken = std::string(partitions[2].begin(), partitions[2].end());
+
+    int enter = channel->enter_channel(client, invitationToken);
+    if (enter > 0) {
+      client->add_channel(channelName);
+      std::string channelInfo = channel->info();
+      return create_packet(request.id, DATAKIND::JOIN, channelInfo);
+    } else if (enter == -1) {
+      return create_packet(-1, DATAKIND::JOIN, "channel is private");
+    } else {
+      return create_packet(-1, DATAKIND::JOIN, "channel is full");
+    }
+  }
 }
 
 int RcServer::read_size(std::shared_ptr<Client> client) {

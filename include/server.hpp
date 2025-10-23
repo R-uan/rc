@@ -1,6 +1,7 @@
 #pragma once
 
 #include "relay_chat.hpp"
+#include "utilities.hpp"
 #include <arpa/inet.h>
 #include <atomic>
 #include <cstdlib>
@@ -38,11 +39,12 @@ private:
 
   void add_client(int fd);
   void rmv_client(std::shared_ptr<Client> client);
+  Packet handle_join(std::shared_ptr<Client> client, Request &request);
 
   RcServer(int mcl, int mch) : MAXCLIENTS(mcl), MAXCHANNELS(mch) {
     this->serverFd = socket(AF_INET, SOCK_STREAM, 0);
     if (this->serverFd == -1) {
-      std::cerr << "Could not create server socket" << std::endl;
+      std::cerr << "could not create server socket" << std::endl;
       exit(1);
     }
 
@@ -52,13 +54,13 @@ private:
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     if (bind(this->serverFd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-      std::cerr << "Server could not be initialized on given addr" << std::endl;
+      std::cerr << "server could not be initialized on given addr" << std::endl;
       close(this->serverFd);
       exit(2);
     }
 
     if (::listen(this->serverFd, SOMAXCONN) == -1) {
-      std::cerr << "Could not start listening to socket" << std::endl;
+      std::cerr << "could not start listening to socket" << std::endl;
       close(this->serverFd);
       exit(3);
     }

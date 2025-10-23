@@ -1,7 +1,6 @@
 #pragma once
 
 #include "utilities.hpp"
-#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -28,6 +27,8 @@ struct Client {
   }
 
   bool send_packet(Packet packet);
+  void add_channel(std::string channel);
+  bool leave_channel(std::string_view target);
 };
 
 typedef std::shared_ptr<Client> Chatter;
@@ -52,25 +53,26 @@ struct Channel {
 
   Chatter emperor;
   std::vector<Chatter> chatters{};
-  std::array<Chatter, 5> moderators{};
+  std::vector<Chatter> moderators{};
   std::vector<std::string> invitations{};
 
-  int enter_channel(Chatter actor);                         // *
-  int leave_channel(Chatter actor);                         // *
-  int enter_channel(Chatter actor, std::string_view token); // *
+  int enter_channel(Chatter actor);                     // *
+  int leave_channel(Chatter actor);                     // *
+  int enter_channel(Chatter actor, std::string &token); // *
 
   int promote_emperor(Chatter mod);
   int promote_emperor(Chatter mod, std::string_view target);
   int promote_moderator(Chatter mod, std::string_view target);
 
   // moderation
-  int change_privacy(Chatter actor); // *
-  int remove_chatter(Chatter actor, std::string_view target);
+  int change_privacy(Chatter actor);                          // *
+  int remove_chatter(Chatter actor, std::string_view target); // *
   int invite_chatter(Chatter actor, std::string_view target);
 
   // utils
   std::string info();
-  bool is_mod(Chatter target); // *
+  bool is_mod(Chatter target);                                  // *
+  std::optional<Chatter> find_chatter(std::string_view target); // *
 
   Channel(std::string n, Chatter creator) : emperor(creator) {
     if (n[0] != '#') {
