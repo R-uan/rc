@@ -4,17 +4,17 @@
 #include <string_view>
 #include <vector>
 
-inline int i32_from_le(const std::vector<uint8_t> bytes) {
-  return static_cast<int>(bytes[0] | bytes[1] << 8 | bytes[2] << 16 |
-                          bytes[3] << 24);
-}
+int i32_from_le(const std::vector<uint8_t> bytes);
+std::vector<std::vector<uint8_t>> split_newline(std::vector<uint8_t> &data);
 
-struct Packet {
+struct Response {
   int id{-1};
   int size{-1};
   int type{-1};
   std::vector<char> data{};
 };
+
+Response create_response(int id, int type, const std::string_view data);
 
 struct Request {
   int id;
@@ -28,25 +28,6 @@ struct Request {
   }
 };
 
-Packet create_packet(int id, int type, const std::string_view data);
-inline std::vector<std::vector<uint8_t>>
-split_newline(std::vector<uint8_t> &data) {
-  std::vector<std::vector<uint8_t>> lines;
-  std::vector<uint8_t> current;
 
-  for (auto byte : data) {
-    if (byte == '\n') {
-      lines.push_back(current);
-      current.clear();
-    } else if (byte == 0x00) {
-      continue;
-    } else {
-      current.push_back(byte);
-    }
-  }
+enum DATAKIND { CONN = 1, NICK = 2, JOIN = 3, SMSG = 4, INVI = 5, KICK = 6 };
 
-  if (!current.empty())
-    lines.push_back(current);
-
-  return lines;
-}

@@ -2,7 +2,12 @@
 #include <cstring>
 #include <string_view>
 
-Packet create_packet(int32_t id, int32_t type, std::string_view data) {
+int i32_from_le(const std::vector<uint8_t> bytes) {
+  return static_cast<int>(bytes[0] | bytes[1] << 8 | bytes[2] << 16 |
+                          bytes[3] << 24);
+}
+
+Response create_response(int32_t id, int32_t type, std::string_view data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -14,11 +19,32 @@ Packet create_packet(int32_t id, int32_t type, std::string_view data) {
   tempData.push_back('\x00');
   tempData.push_back('\x00');
 
-  Packet packet;
+  Response packet;
   packet.id = id;
   packet.size = dataSize;
   packet.type = type;
   packet.data = tempData;
 
   return packet;
+}
+
+std::vector<std::vector<uint8_t>> split_newline(std::vector<uint8_t> &data) {
+  std::vector<std::vector<uint8_t>> lines;
+  std::vector<uint8_t> current;
+
+  for (auto byte : data) {
+    if (byte == '\n') {
+      lines.push_back(current);
+      current.clear();
+    } else if (byte == 0x00) {
+      continue;
+    } else {
+      current.push_back(byte);
+    }
+  }
+
+  if (!current.empty())
+    lines.push_back(current);
+
+  return lines;
 }

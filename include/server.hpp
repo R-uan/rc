@@ -1,5 +1,6 @@
 #pragma once
 
+#include "channel.hpp"
 #include "relay_chat.hpp"
 #include "utilities.hpp"
 #include <arpa/inet.h>
@@ -9,7 +10,6 @@
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
-#include <string>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -34,12 +34,12 @@ private:
   // channel keys should start with `#`, ex: #general
   std::unordered_map<std::string, std::shared_ptr<Channel>> channels;
 
-  int read_size(std::shared_ptr<Client> client);
+  int read_size(std::shared_ptr<Client> client); // *
   int read_incoming(std::shared_ptr<Client> client);
 
-  void add_client(int fd);
-  void rmv_client(std::shared_ptr<Client> client);
-  Packet handle_join(std::shared_ptr<Client> client, Request &request);
+  void add_client(int fd); //*
+  void remove_client(std::shared_ptr<Client> client);
+  Response handle_join(std::shared_ptr<Client> client, Request &request); // *
 
   RcServer(int mcl, int mch) : MAXCLIENTS(mcl), MAXCHANNELS(mch) {
     this->serverFd = socket(AF_INET, SOCK_STREAM, 0);
