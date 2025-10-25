@@ -12,7 +12,7 @@ bool Client::send_packet(Response packet) {
   return true;
 }
 
-bool Client::leave_channel(std::string_view target) {
+bool Client::remove_channel(const std::string_view &target) {
   {
     std::unique_lock lock(this->mtx);
     auto result =
@@ -23,7 +23,7 @@ bool Client::leave_channel(std::string_view target) {
   }
 }
 
-void Client::add_channel(std::string channel) {
+void Client::add_channel(const std::string_view &channel) {
   std::unique_lock lock(this->mtx);
-  this->channels.push_back(channel);
+  this->channels.push_back(channel.data());
 }

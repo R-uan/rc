@@ -2,11 +2,13 @@
 
 #include "utilities.hpp"
 #include <atomic>
+#include <iostream>
 #include <mutex>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <vector>
 
 struct Client {
@@ -24,8 +26,12 @@ struct Client {
     this->fd = fd;
   }
 
-  bool send_packet(Response packet);
-  void add_channel(std::string channel);
-  bool leave_channel(std::string_view target);
-};
+  ~Client() {
+    std::cout << this->username << " destroyed" << std::endl;
+    close(this->fd);
+  }
 
+  bool send_packet(const Response packet);
+  void add_channel(const std::string_view &channel);
+  bool remove_channel(const std::string_view &target);
+};

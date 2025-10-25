@@ -88,7 +88,7 @@ int Channel::remove_chatter(const ClientPtr &actor, std::string_view target) {
     return -1;
 
   auto chatter = result.value();
-  chatter->leave_channel(this->name);
+  chatter->remove_channel(this->name);
   this->disconnect_chatter(chatter);
   return 1;
 }
@@ -120,4 +120,10 @@ bool Channel::is_authority(const ClientPtr &target) {
       std::find_if(m.begin(), m.end(),
                    [&](const ClientPtr &chatter) { return chatter == target; });
   return chatter != m.end() ? true : target.get() == this->emperor.get();
+}
+
+void Channel::remove_chatter(const ClientPtr &target) {
+  std::unique_lock lock(this->mtx);
+  std::erase_if(this->chatters,
+                [&](const ClientPtr &client) { return client == target; });
 }

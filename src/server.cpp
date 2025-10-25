@@ -1,14 +1,18 @@
-#include "relay_chat.hpp"
 #include "server.hpp"
+#include "relay_chat.hpp"
 #include "thread_pool.hpp"
 #include "utilities.hpp"
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <vector>
 
 // Utilises EPOLL to monitor new inputs on the server and client's file
@@ -27,6 +31,7 @@ void RcServer::listen() {
       if (fd == this->serverFd) {
         int ncfd = accept(this->serverFd, nullptr, nullptr);
         if (ncfd != -1) {
+          std::cout << "new client connected" << std::endl;
           this->add_client(ncfd);
         }
       }
@@ -74,6 +79,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
 
   Request request(buffer);
   Response response{};
+  // Check if the client has connected (sent their username)
   if (!client->connected) {
     // Check if the max client capacity has been reached
     if (this->clients.size() >= this->MAXCLIENTS) {
@@ -87,6 +93,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
         std::ostringstream oss;
         oss << nick << "@" << this->identifiers;
         auto username = oss.str();
+        std::cout << username << " new client" << std::endl;
         client->username = username;
         this->identifiers.fetch_add(1);
         response = create_response(request.id, DATAKIND::CONN, username);
@@ -129,6 +136,7 @@ Response RcServer::handle_join(std::shared_ptr<Client> client,
     } else {
       auto newChannel = std::make_shared<Channel>(channelName, client);
       std::string channelInfo(newChannel->info());
+      std::cout << newChannel->name << " channel created" << std::endl;
       this->channels.emplace(channelName, newChannel);
       return create_response(request.id, DATAKIND::JOIN, channelInfo);
     }
@@ -155,7 +163,7 @@ int RcServer::read_size(std::shared_ptr<Client> client) {
   std::vector<uint8_t> buffer{};
   buffer.resize(4);
 
-  if (recv(client->fd, &buffer, 4, 0) == -1) {
+  if (recv(client->fd, buffer.data(), 4, 0) == -1) {
     return -1;
   }
 
@@ -178,10 +186,43 @@ void RcServer::add_client(int fd) {
 // Removes the shared pointer from the server client list
 // Removes the shared pointer from the channels they're part of
 // Shutsdown and closes the file descriptor
-void RcServer::remove_client(std::shared_ptr<Client> client) {
-  int targetDescriptor = client->fd;
-  auto hi = this->clients.erase(targetDescriptor);
-  for (auto channel : client->channels) {
-    
+void RcServer::remove_client(const std::shared_ptr<Client> &client) {
+  std::cout << client->username << " disconnected" << std::endl;
+  // lets start from the bottom and move our way up.
+  // the first step should be tell client's channels that they are leaving
+  // for that, we will loop through client's channel list and get it's ptr
+  for (std::string channelName : client->channels) {
+    // we will then get the channel based on the name
+    auto option = this->get_channel(channelName);
+    if (!option.has_value())
+      continue;
+
+    auto channel = option.value();
+    // and remove the client from that channel client pool
+    channel->remove_chatter(client);
   }
+
+  // next we will clear the client's channel pool
+  {
+    std::unique_lock lock(client->mtx);
+    client->channels.clear();
+  }
+
+  // then we will remove the client ptr from the server's client pool
+  {
+    std::unique_lock lock(this->serverMtx);
+    this->clients.erase(client->fd);
+  }
+
+  // at this point, the last client reference should be here so when it goes out
+  // of scope it will be destroyed and the fd will be closed
+}
+
+std::optional<std::shared_ptr<Channel>>
+RcServer::get_channel(const std::string &name) {
+  auto result = this->channels.find(name);
+  if (result != this->channels.end()) {
+    return result->second;
+  }
+  return std::nullopt;
 }

@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <optional>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -38,9 +39,11 @@ private:
   int read_incoming(std::shared_ptr<Client> client);
 
   void add_client(int fd); //*
-  void remove_client(std::shared_ptr<Client> client);
+  void remove_client(const std::shared_ptr<Client> &client);
   Response handle_join(std::shared_ptr<Client> client, Request &request); // *
+  std::optional<std::shared_ptr<Channel>> get_channel(const std::string &name);
 
+public:
   RcServer(int mcl, int mch) : MAXCLIENTS(mcl), MAXCHANNELS(mch) {
     this->serverFd = socket(AF_INET, SOCK_STREAM, 0);
     if (this->serverFd == -1) {
@@ -50,7 +53,7 @@ private:
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(8080);
+    addr.sin_port = htons(3000);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     if (bind(this->serverFd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
@@ -70,6 +73,7 @@ private:
     ev.data.fd = this->serverFd;
     this->epollFd = epoll_create1(0);
     epoll_ctl(this->epollFd, EPOLL_CTL_ADD, this->serverFd, &ev);
+    std::cout << "server has been initialized" << std::endl;
   }
 
   ~RcServer() {
@@ -77,6 +81,5 @@ private:
     close(this->serverFd);
   }
 
-public:
   void listen();
 };

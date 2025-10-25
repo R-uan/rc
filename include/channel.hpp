@@ -38,6 +38,7 @@ struct Channel {
   int change_privacy(const ClientPtr &actor); // *
   int invite_chatter(const ClientPtr &actor, std::string_view target);
   int remove_chatter(const ClientPtr &actor, std::string_view target); // *
+  void remove_chatter(const ClientPtr &target);
 
   // utils
   std::string info();                                                    // *

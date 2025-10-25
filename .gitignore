@@ -2,6 +2,7 @@
 
 build/
 .cache/
+test/test
 ### C++ ###
 # Prerequisites
 *.d
