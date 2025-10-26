@@ -38,7 +38,7 @@ struct Channel {
   int change_privacy(const ClientPtr &actor); // *
   int invite_chatter(const ClientPtr &actor, std::string_view target);
   int remove_chatter(const ClientPtr &actor, std::string_view target); // *
-  void remove_chatter(const ClientPtr &target);
+  bool remove_chatter(const ClientPtr &target);
 
   // utils
   std::string info();                                                    // *
@@ -51,5 +51,9 @@ struct Channel {
       n = '#' + n;
     }
     this->name = n;
+  }
+
+  ~Channel() {
+    std::cout << "ch: " << this->name << " has been destroyed" << std::endl;
   }
 };

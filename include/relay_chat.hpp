@@ -10,7 +10,14 @@
 #include <string_view>
 #include <unistd.h>
 #include <vector>
-
+// Shared Pointer Tracker (Where a client shared_ptr can be found)
+// # RcServer
+//   -> client unordered map
+// # Channel
+//   -> chatter vector
+//   -> moderator vector
+//   -> emperor
+//
 struct Client {
   int fd;
   std::mutex mtx;

@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -56,6 +57,8 @@ void RcServer::listen() {
             }
           } else {
             this->remove_client(clientPtr);
+            std::cout << "should be destroyed" << std::endl;
+            std::cout << "use_count: " << clientPtr.use_count() << "\n";
           }
         });
       }
@@ -95,6 +98,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
         auto username = oss.str();
         std::cout << username << " new client" << std::endl;
         client->username = username;
+        client->connected.exchange(true);
         this->identifiers.fetch_add(1);
         response = create_response(request.id, DATAKIND::CONN, username);
       }
@@ -102,6 +106,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
   } else {
     switch (request.type) {
     case DATAKIND::JOIN:
+      std::cout << "new join request" << std::endl;
       response = this->handle_join(client, request);
       break;
     }
@@ -123,6 +128,7 @@ Response RcServer::handle_join(std::shared_ptr<Client> client,
                                Request &request) {
   auto partitions = split_newline(request.payload);
   if (partitions.size() < 2 || partitions.size() > 3) {
+    std::cout << "invalid packet" << std::endl;
     return create_response(-1, DATAKIND::JOIN, "invalid packet");
   }
 
@@ -132,12 +138,17 @@ Response RcServer::handle_join(std::shared_ptr<Client> client,
   auto it = this->channels.find(channelName);
   if (it == this->channels.end()) {
     if (!flag || this->channels.size() == this->MAXCHANNELS) {
+      std::cout << "channel does not exist" << std::endl;
       return create_response(-1, DATAKIND::JOIN, "does not exist");
     } else {
       auto newChannel = std::make_shared<Channel>(channelName, client);
       std::string channelInfo(newChannel->info());
       std::cout << newChannel->name << " channel created" << std::endl;
-      this->channels.emplace(channelName, newChannel);
+      this->channels.emplace(newChannel->name, newChannel);
+      {
+        std::unique_lock lock(client->mtx);
+        client->channels.push_back(newChannel->name);
+      }
       return create_response(request.id, DATAKIND::JOIN, channelInfo);
     }
   } else {
@@ -150,6 +161,7 @@ Response RcServer::handle_join(std::shared_ptr<Client> client,
     if (enter > 0) {
       client->add_channel(channelName);
       std::string channelInfo = channel->info();
+      std::cout << client->username << " joins " << channelName << std::endl;
       return create_response(request.id, DATAKIND::JOIN, channelInfo);
     } else if (enter == -1) {
       return create_response(-1, DATAKIND::JOIN, "channel is private");
@@ -188,18 +200,15 @@ void RcServer::add_client(int fd) {
 // Shutsdown and closes the file descriptor
 void RcServer::remove_client(const std::shared_ptr<Client> &client) {
   std::cout << client->username << " disconnected" << std::endl;
-  // lets start from the bottom and move our way up.
-  // the first step should be tell client's channels that they are leaving
-  // for that, we will loop through client's channel list and get it's ptr
+  // Begin by removing the client from the channels' client pool.
   for (std::string channelName : client->channels) {
-    // we will then get the channel based on the name
+    std::cout << "leaving channel: " << channelName << std::endl;
     auto option = this->get_channel(channelName);
     if (!option.has_value())
       continue;
-
     auto channel = option.value();
-    // and remove the client from that channel client pool
     channel->remove_chatter(client);
+    this->channels.erase(channelName);
   }
 
   // next we will clear the client's channel pool
@@ -213,6 +222,8 @@ void RcServer::remove_client(const std::shared_ptr<Client> &client) {
     std::unique_lock lock(this->serverMtx);
     this->clients.erase(client->fd);
   }
+
+  epoll_ctl(this->epollFd, EPOLL_CTL_DEL, client->fd, nullptr);
 
   // at this point, the last client reference should be here so when it goes out
   // of scope it will be destroyed and the fd will be closed

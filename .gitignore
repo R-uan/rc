@@ -1,5 +1,6 @@
 # Created by https://www.toptal.com/developers/gitignore/api/c++
 
+.vscode
 build/
 .cache/
 test/test

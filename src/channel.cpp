@@ -122,8 +122,28 @@ bool Channel::is_authority(const ClientPtr &target) {
   return chatter != m.end() ? true : target.get() == this->emperor.get();
 }
 
-void Channel::remove_chatter(const ClientPtr &target) {
+bool Channel::remove_chatter(const ClientPtr &target) {
+  bool deletionFlag = false;
   std::unique_lock lock(this->mtx);
+  if (this->emperor == target) {
+    if (this->moderators.size() == 0) {
+      std::cout << "no moderator to promote, channel will be deleted: "
+                << this->name << std::endl;
+      deletionFlag = true;
+      // What you're doing is very brave but also dangerous
+      this->emperor = nullptr;
+    } else {
+      ClientPtr newEmperor = this->moderators[0];
+      this->moderators.erase(this->moderators.begin());
+      this->emperor = newEmperor;
+    }
+  }
+
+  std::erase_if(this->moderators,
+                [&](const ClientPtr &client) { return client == target; });
+
   std::erase_if(this->chatters,
                 [&](const ClientPtr &client) { return client == target; });
+
+  return deletionFlag;
 }
