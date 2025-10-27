@@ -122,17 +122,20 @@ bool Channel::is_authority(const ClientPtr &target) {
   return chatter != m.end() ? true : target.get() == this->emperor.get();
 }
 
+// * Totally removes a chatter from the channel.
+// * If the chatter is the emperor, give the ownership of the channel
+// to the oldest mod. Otherwise marks the channel for deletion.
 bool Channel::remove_chatter(const ClientPtr &target) {
   bool deletionFlag = false;
   std::unique_lock lock(this->mtx);
   if (this->emperor == target) {
     if (this->moderators.size() == 0) {
-      std::cout << "no moderator to promote, channel will be deleted: "
-                << this->name << std::endl;
-      deletionFlag = true;
-      // What you're doing is very brave but also dangerous
+      // * Because the channel is flagged to be deleted
+      // it's safe to nullptr this (I think (I hope)).
       this->emperor = nullptr;
+      deletionFlag = true;
     } else {
+      // Transfers ownership to the oldest moderator.
       ClientPtr newEmperor = this->moderators[0];
       this->moderators.erase(this->moderators.begin());
       this->emperor = newEmperor;
