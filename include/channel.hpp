@@ -23,11 +23,10 @@ struct Channel {
   std::atomic_bool secret{false};
 
   ClientPtr emperor;
-  std::vector<ClientPtr> chatters{};
+  std::vector<ClientPtr> members{};
   std::vector<ClientPtr> moderators{};
   std::vector<std::string> invitations{};
 
-  int leave_channel(ClientPtr &actor);                    // *
   int enter_channel(ClientPtr actor, std::string &token); // *
 
   int promote_emp(const ClientPtr &actor);
@@ -35,15 +34,14 @@ struct Channel {
   int promote_mod(const ClientPtr &actor, std::string_view target); // *
 
   // moderation
-  int change_privacy(const ClientPtr &actor); // *
-  int invite_chatter(const ClientPtr &actor, std::string_view target);
-  int remove_chatter(const ClientPtr &actor, std::string_view target); // *
-  bool remove_chatter(const ClientPtr &target);
+  bool change_privacy(const ClientPtr &actor); // *
+  bool disconnect_member(const ClientPtr &target);
+  bool kick_member(const ClientPtr &actor, std::string_view target); // *
+  bool invite_member(const ClientPtr &actor, std::string_view target);
 
   // utils
   std::string info();                                                    // *
   bool is_authority(const ClientPtr &target);                            // *
-  bool disconnect_chatter(const ClientPtr &target);                      // *
   std::optional<ClientPtr> find_chatter(const std::string_view &target); // *
 
   Channel(std::string n, ClientPtr creator) : emperor(creator) {

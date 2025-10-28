@@ -2,12 +2,12 @@
 #include <algorithm>
 #include <sstream>
 
-// Attempts to join channel
+// * Attempts to join channel
 // - If the channel is secret a token of size bigger than zero is needed.
 // - Checks if the channel's MAXCAPACITY has been reached.
 // - Checks if the given token is present on the issued invitations vector.
 int Channel::enter_channel(ClientPtr actor, std::string &token) {
-  if (this->chatters.size() == this->MAXCAPACITY) {
+  if (this->members.size() == this->MAXCAPACITY) {
     return 0;
   }
 
@@ -27,34 +27,15 @@ int Channel::enter_channel(ClientPtr actor, std::string &token) {
 
   {
     std::unique_lock lock(this->mtx);
-    this->chatters.push_back(std::move(actor));
+    this->members.push_back(std::move(actor));
   }
 
-  return this->chatters.size();
+  return this->members.size();
 }
 
-int Channel::leave_channel(ClientPtr &actor) {
-  {
-    std::unique_lock thisLock(this->mtx);
-    auto result = std::erase_if(this->chatters, [&](const ClientPtr &client) {
-      return client == actor;
-    });
-    if (result == 0)
-      return -1;
-  }
-  {
-    std::unique_lock actorLock(actor->mtx);
-    std::erase_if(actor->channels, [&](const std::string &channel) {
-      return channel == this->name;
-    });
-  }
-
-  return 0;
-}
-
-// # Switch for the privacy of the channel.
-// # Can only be changed by the emperor.
-int Channel::change_privacy(const ClientPtr &actor) {
+// * Switch for the privacy of the channel.
+// * Can only be changed by the emperor.
+bool Channel::change_privacy(const ClientPtr &actor) {
   if (!(this->emperor == actor))
     return -1;
   else {
@@ -67,9 +48,9 @@ int Channel::change_privacy(const ClientPtr &actor) {
 // found
 std::optional<ClientPtr> Channel::find_chatter(const std::string_view &target) {
   auto result = std::find_if(
-      this->chatters.begin(), this->chatters.end(),
+      this->members.begin(), this->members.end(),
       [&](const ClientPtr &chatter) { return chatter->username == target; });
-  if (result == this->chatters.end())
+  if (result == this->members.end())
     return std::nullopt;
   return *result;
 }
@@ -79,7 +60,7 @@ std::optional<ClientPtr> Channel::find_chatter(const std::string_view &target) {
 // ## Looks for the target chatter
 // ## Force disconnect the chatter
 // ## Removes them from the channel's list
-int Channel::remove_chatter(const ClientPtr &actor, std::string_view target) {
+bool Channel::kick_member(const ClientPtr &actor, std::string_view target) {
   if (!this->is_authority(actor))
     return -1;
 
@@ -87,18 +68,12 @@ int Channel::remove_chatter(const ClientPtr &actor, std::string_view target) {
   if (result == std::nullopt)
     return -1;
 
-  auto chatter = result.value();
-  chatter->remove_channel(this->name);
-  this->disconnect_chatter(chatter);
+  auto member = result.value();
+  member->remove_channel(this->name);
+  this->disconnect_member(member);
   return 1;
 }
 
-// # Removes the target chatter from the channel's chatter list
-bool Channel::disconnect_chatter(const ClientPtr &target) {
-  std::unique_lock lock(this->mtx);
-  return std::erase_if(this->chatters,
-                       [&](ClientPtr chatter) { return chatter == target; });
-}
 // # Emperor manually promotes a moderator to emperor
 // # The emperor will become a moderator and the target moderator will become
 // the emperor.
@@ -110,7 +85,7 @@ int Channel::promote_mod(const ClientPtr &actor, std::string_view target) {
 std::string Channel::info() {
   std::ostringstream info;
   info << this->name << '\n';
-  info << this->chatters.size() << '\n';
+  info << this->members.size() << '\n';
   return info.str();
 }
 
@@ -125,7 +100,7 @@ bool Channel::is_authority(const ClientPtr &target) {
 // * Totally removes a chatter from the channel.
 // * If the chatter is the emperor, give the ownership of the channel
 // to the oldest mod. Otherwise marks the channel for deletion.
-bool Channel::remove_chatter(const ClientPtr &target) {
+bool Channel::disconnect_member(const ClientPtr &target) {
   bool deletionFlag = false;
   std::unique_lock lock(this->mtx);
   if (this->emperor == target) {
@@ -145,7 +120,7 @@ bool Channel::remove_chatter(const ClientPtr &target) {
   std::erase_if(this->moderators,
                 [&](const ClientPtr &client) { return client == target; });
 
-  std::erase_if(this->chatters,
+  std::erase_if(this->members,
                 [&](const ClientPtr &client) { return client == target; });
 
   return deletionFlag;

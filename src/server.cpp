@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -36,6 +37,7 @@ void RcServer::listen() {
           this->add_client(ncfd);
         }
       } else {
+        std::shared_lock lock(this->epollMtx);
         auto result = this->clients.find(fd);
         if (result != this->clients.end()) {
           std::shared_ptr<Client> client = result->second;
@@ -72,20 +74,20 @@ void RcServer::listen() {
 // be treated as connection request until the client is connected.
 // - After connection, pass requests down to their respective handlers and
 // send back a response.
-int RcServer::read_incoming(std::shared_ptr<Client> client) {
+int RcServer::read_incoming(ClientPtr client) {
   int packetSize = this->read_size(client);
-
   if (packetSize <= 0) {
     return -1;
   }
 
   std::vector<uint8_t> buffer{};
   buffer.resize(packetSize);
-
-  if (recv(client->fd, buffer.data(), packetSize, 0) <= 0) {
-    return -1;
+  {
+    std::unique_lock lock(client->mtx);
+    if (recv(client->fd, buffer.data(), packetSize, 0) <= 0) {
+      return -1;
+    }
   }
-
   Response response{};
   Request request(buffer);
   // Check if the client has connected (sent their username)
@@ -105,12 +107,13 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
         // Adds the unique identifier to the username.
         std::ostringstream handler;
         handler << username << "@" << this->identifiers;
-
-        // Sets the user handler to the client.username
-        // and change client.connection state.
-        client->username = handler.str();
-        client->connected.exchange(true);
-
+        {
+          // Sets the user handler to the client.username
+          // and change client.connection state.
+          std::unique_lock lock(client->mtx);
+          client->username = handler.str();
+          client->connected.exchange(true);
+        }
         this->identifiers.fetch_add(1);
         response = create_response(request.id, DATAKIND::CONN, handler.str());
       }
@@ -158,7 +161,7 @@ Response RcServer::handle_join(ClientPtr client, Request &request) {
       std::string channelInfo(newChannel->info());
       std::cout << "channel created (" << newChannel->name << ")" << std::endl;
       {
-        std::unique_lock lock(this->serverMtx);
+        std::unique_lock lock(this->channelMtx);
         this->channels.emplace(newChannel->name, newChannel);
       }
       {
@@ -192,11 +195,12 @@ Response RcServer::handle_join(ClientPtr client, Request &request) {
 int RcServer::read_size(std::shared_ptr<Client> client) {
   std::vector<uint8_t> buffer{};
   buffer.resize(4);
-
-  if (recv(client->fd, buffer.data(), 4, 0) == -1) {
-    return -1;
+  {
+    std::unique_lock lock(client->mtx);
+    if (recv(client->fd, buffer.data(), 4, 0) == -1) {
+      return -1;
+    }
   }
-
   return i32_from_le(buffer);
 }
 
@@ -227,22 +231,14 @@ void RcServer::remove_client(const std::shared_ptr<Client> &client) {
     if (option.has_value()) {
       auto channel = option.value();
       // * If true, the channel was flagged for deletion.
-      if (channel->remove_chatter(client)) {
+      if (channel->disconnect_member(client)) {
         this->channels.erase(channelName);
       }
     }
   }
 
-  // then we will remove the client ptr from the server's client pool
-  {
-    std::unique_lock lock(this->serverMtx);
-    this->clients.erase(client->fd);
-  }
-
-  epoll_ctl(this->epollFd, EPOLL_CTL_DEL, client->fd, nullptr);
-
-  // at this point, the last client reference should be here so when it goes out
-  // of scope it will be destroyed and the fd will be closed
+  std::unique_lock lock(this->clientMtx);
+  this->clients.erase(client->fd);
 }
 
 // Not sure if this function is necessary but it will remain as for now.

@@ -1,16 +1,15 @@
 #pragma once
 
 #include "channel.hpp"
-#include "relay_chat.hpp"
 #include "utilities.hpp"
 #include <arpa/inet.h>
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <netinet/in.h>
 #include <optional>
+#include <shared_mutex>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -27,20 +26,21 @@ private:
   // used in the creation of username to guarantee uniqueness
   std::atomic_int identifiers;
 
-  std::mutex epollMtx;
-  std::mutex serverMtx;
+  std::shared_mutex epollMtx;
+  std::shared_mutex clientMtx;
+  std::shared_mutex channelMtx;
 
   // client keys are their file descriptor
-  std::unordered_map<int, std::shared_ptr<Client>> clients;
+  std::unordered_map<int, ClientPtr> clients;
   // channel keys should start with `#`, ex: #general
   std::unordered_map<std::string, std::shared_ptr<Channel>> channels;
 
-  int read_size(std::shared_ptr<Client> client); // *
-  int read_incoming(std::shared_ptr<Client> client);
+  int read_size(ClientPtr client); // *
+  int read_incoming(ClientPtr client);
 
   void add_client(int fd); //*
-  void remove_client(const std::shared_ptr<Client> &client);
-  Response handle_join(std::shared_ptr<Client> client, Request &request); // *
+  void remove_client(const ClientPtr &client);
+  Response handle_join(ClientPtr client, Request &request); // *
   std::optional<std::shared_ptr<Channel>> get_channel(const std::string &name);
 
 public:

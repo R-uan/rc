@@ -42,7 +42,7 @@ int main() {
   // send connection packet
   ssize_t s = send(sock, CONN, sizeof(CONN), 0);
 
-  std::this_thread::sleep_for(std::chrono::seconds(2));
+  // std::this_thread::sleep_for(std::chrono::seconds(2));
 
   const uint8_t JOIN[]{0x10, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
                        0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x0A, // flag
