@@ -1,50 +1,52 @@
 #pragma once
 
 #include "channel.hpp"
-#include "utilities.hpp"
+#include "relay_chat.hpp"
+#include "thread_pool.hpp"
 #include <arpa/inet.h>
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <netinet/in.h>
-#include <optional>
 #include <shared_mutex>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <unordered_map>
 
-class RcServer {
+class RcServer : public std::enable_shared_from_this<RcServer> {
 private:
   int epollFd;
   int serverFd;
 
-  // server capacity
   const int MAXCLIENTS;
   const int MAXCHANNELS;
-  // used in the creation of username to guarantee uniqueness
-  std::atomic_int identifiers;
+
+  std::atomic_int clientIds;
+  std::atomic_int channelIds;
 
   std::shared_mutex epollMtx;
   std::shared_mutex clientMtx;
   std::shared_mutex channelMtx;
 
-  // client keys are their file descriptor
-  std::unordered_map<int, ClientPtr> clients;
-  // channel keys should start with `#`, ex: #general
-  std::unordered_map<std::string, std::shared_ptr<Channel>> channels;
+  std::unordered_map<int, std::unique_ptr<Channel>> channels;
 
-  int read_size(ClientPtr client); // *
-  int read_incoming(ClientPtr client);
+  int read_size(WeakClient pointer); // *
+  int read_incoming(std::shared_ptr<Client> client);
 
   void add_client(int fd); //*
-  void remove_client(const ClientPtr &client);
-  Response handle_join(ClientPtr client, Request &request); // *
-  std::optional<std::shared_ptr<Channel>> get_channel(const std::string &name);
+  void handle_disconnect(const WeakClient &client);
+  Response handle_join(WeakClient &client, Request &request); // *
+  std::optional<Channel *> get_channel(const std::string &name);
 
 public:
-  RcServer(int mcl, int mch) : MAXCLIENTS(mcl), MAXCHANNELS(mch) {
+  std::unique_ptr<ThreadPool> threadPool;
+  std::unordered_map<int, std::shared_ptr<Client>> clients;
+
+  RcServer(int mcl, int mch, int threads)
+      : MAXCLIENTS(mcl), MAXCHANNELS(mch),
+        threadPool(std::make_unique<ThreadPool>(threads)) {
     this->serverFd = socket(AF_INET, SOCK_STREAM, 0);
     if (this->serverFd == -1) {
       std::cerr << "could not create server socket" << std::endl;
@@ -82,4 +84,5 @@ public:
   }
 
   void listen();
+  void destroy_channel(int id);
 };

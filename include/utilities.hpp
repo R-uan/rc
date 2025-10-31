@@ -7,6 +7,16 @@
 
 int i32_from_le(const std::vector<uint8_t> bytes);
 std::vector<std::vector<uint8_t>> split_newline(std::vector<uint8_t> &data);
+enum DATAKIND {
+  SVR_CONNECT = 1,
+  SVR_DISCONNECT = 2,
+  SVR_MESSAGE = 3,
+  CH_CONNECT = 4,
+  CH_DISCONNECT = 5,
+  CH_MESSAGE = 6,
+  CH_COMMAND = 7,
+  CH_DESTROY = 8
+};
 
 struct Response {
   int id{-1};
@@ -29,5 +39,3 @@ struct Request {
     std::cout << "new request of type " << this->type << std::endl;
   }
 };
-
-enum DATAKIND { CONN = 1, NICK = 2, JOIN = 3, SMSG = 4, INVI = 5, KICK = 6 };

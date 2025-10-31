@@ -1,7 +1,8 @@
 #include "server.hpp"
+#include <memory>
 
 int main() {
-  RcServer server(1000, 50);
-  server.listen();
+  std::shared_ptr<RcServer> server(new RcServer(1000, 50, 20));
+  server->listen();
   return 0;
 }
