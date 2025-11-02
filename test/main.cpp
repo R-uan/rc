@@ -49,11 +49,11 @@ int main() {
       0x03, 0x00, 0x00, 0x00, // id
       0x04, 0x00, 0x00, 0x00, // type
       0x01,                   // flag
-      0x05, 0x00, 0x00, 0x00, // channel id
+      0x01, 0x00, 0x00, 0x00, // channel id
       0x00,
       0x00 // null
   };
 
   ssize_t ss = send(sock, JOIN, sizeof(JOIN), 0);
-  std::this_thread::sleep_for(std::chrono::seconds(5));
+  std::this_thread::sleep_for(std::chrono::seconds(60));
 }

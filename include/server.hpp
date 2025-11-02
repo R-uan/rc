@@ -5,10 +5,12 @@
 #include "thread_pool.hpp"
 #include <arpa/inet.h>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <netinet/in.h>
+#include <optional>
 #include <shared_mutex>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -23,26 +25,37 @@ private:
   const int MAXCLIENTS;
   const int MAXCHANNELS;
 
-  std::atomic_int clientIds;
-  std::atomic_int channelIds;
+  std::atomic_int clientIds{1};
+  std::atomic_int channelIds{1};
 
   std::shared_mutex epollMtx;
   std::shared_mutex clientMtx;
   std::shared_mutex channelMtx;
 
-  std::unordered_map<int, std::unique_ptr<Channel>> channels;
+  std::unordered_map<uint32_t, std::unique_ptr<Channel>> channels;
 
   int read_size(WeakClient pointer); // *
   int read_incoming(std::shared_ptr<Client> client);
 
   void add_client(int fd); //*
-  void handle_disconnect(const WeakClient &client);
-  Response handle_join(WeakClient &client, Request &request); // *
+  void remove_channel(uint32_t channelId);
   std::optional<Channel *> get_channel(const std::string &name);
+
+  // Server Related Request Handlers
+  // SVR_CONNECT handler is builtin the read_incoming
+  // SRV_MESSAGE is exclusive to server -> client so it doesn't have a handler.
+  void srv_disconnect(const WeakClient &client);
+
+  // Channel Related Request Handlers
+  Response ch_connect(WeakClient &client, Request &request); // *
+  Response ch_disconnect(const WeakClient &client, Request &request);
+
+  Response ch_message(const WeakClient &client, Request &request);
+  Response ch_command(const WeakClient &client, Request &request);
 
 public:
   std::unique_ptr<ThreadPool> threadPool;
-  std::unordered_map<int, std::shared_ptr<Client>> clients;
+  std::unordered_map<uint32_t, std::shared_ptr<Client>> clients;
 
   RcServer(int mcl, int mch, int threads)
       : MAXCLIENTS(mcl), MAXCHANNELS(mch),

@@ -52,7 +52,7 @@ void RcServer::listen() {
               std::unique_lock lock(this->epollMtx);
               epoll_ctl(epollFd, EPOLL_CTL_MOD, client->fd, &event);
             } else {
-              this->handle_disconnect(client);
+              this->srv_disconnect(client);
               epoll_ctl(this->epollFd, EPOLL_CTL_DEL, client->fd, nullptr);
             }
           });
@@ -120,10 +120,13 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
       }
     }
   } else {
+    std::weak_ptr<Client> weakPtr = client;
     switch (request.type) {
     case DATAKIND::CH_CONNECT:
-      std::weak_ptr<Client> weakPtr = client;
-      response = this->handle_join(weakPtr, request);
+      response = this->ch_connect(weakPtr, request);
+      break;
+    case DATAKIND::CH_DISCONNECT:
+      response = this->ch_disconnect(weakPtr, request);
       break;
     }
   }
@@ -139,7 +142,7 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
 //  - <flag>    : channel creation flag
 //  - <channel> : target channel's id (int) to join.
 //  - <token>   : invitation token (optional).
-Response RcServer::handle_join(WeakClient &client, Request &request) {
+Response RcServer::ch_connect(WeakClient &client, Request &request) {
   auto pl = request.payload;
   if (pl.size() < 5) {
     return create_response(-1, DATAKIND::CH_CONNECT, "invalid packet");
@@ -226,15 +229,15 @@ void RcServer::add_client(int fd) {
 //    - Channel -> chatters::vector
 //    - Channel -> moderators::vector
 //    - Channel -> emperor::shared_ptr
-void RcServer::handle_disconnect(const WeakClient &wclient) {
+void RcServer::srv_disconnect(const WeakClient &wclient) {
   auto client = wclient.lock();
+  client->connected.exchange(false);
 
   for (int id : client->channels) {
     auto it = this->channels.find(id);
     if (it != this->channels.end()) {
       if (it->second->disconnect_member(client)) {
-        std::unique_lock lock(this->channelMtx);
-        this->channels.erase(id);
+        this->remove_channel(id);
       }
     }
   }
@@ -243,4 +246,27 @@ void RcServer::handle_disconnect(const WeakClient &wclient) {
   this->clients.erase(client->fd);
 }
 
-void RcServer::destroy_channel(int id) { this->channels.erase(id); }
+void RcServer::remove_channel(uint32_t channelId) {
+  std::unique_lock lock(this->channelMtx);
+  this->channels.erase(channelId);
+}
+
+Response RcServer::ch_disconnect(const WeakClient &client, Request &request) {
+  if (request.payload.size() < 4) {
+    return create_response(-1, DATAKIND::CH_DISCONNECT, {1});
+  }
+
+  auto pl = request.payload;
+  uint32_t channelId = i32_from_le({pl[0], pl[1], pl[2], pl[3]});
+  auto channel = this->channels.find(channelId);
+
+  if (channel == this->channels.end()) {
+    return create_response(-1, DATAKIND::CH_DISCONNECT, {2});
+  }
+
+  if (channel->second->disconnect_member(client)) {
+    this->remove_channel(channelId);
+  }
+
+  return create_response(request.id, DATAKIND::CH_DISCONNECT, "");
+}

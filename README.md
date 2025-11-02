@@ -1,4 +1,4 @@
-# Packet kinds
+### Packet kinds
 - `SRV_CONNECT` : Initial connection to the server.
 - `SRV_DISCONNECT` : Disconnects from the server.
 - `SVR_MESSAGE` : Server wide messages from the server to client.
@@ -6,7 +6,42 @@
 - `CH_DISCONNECT` : Client disconnects from a channel.
 - `CH_MESSAGE` : Client sends a message on the channel.
 - `CH_COMMAND` : Channel management commands.
- 
+
+### Packet Payload
+
+#### `SRV_CONNECT`
+Null terminated string containing the client's desired username. The username may not exceed twelve characteres.
+
+#### `SRV_DISCONNECT` 
+Null byte may suffice. The server will not read this request type's payload.
+
+#### `SRV_MESSAGE`
+- 8-bit integer : Indicates the nature of the message (Info, Error, Annoucement)
+- Null-terminated ASCII String : Max of 1000 bytes per message (1000 characteres).
+
+#### `CH_CONNECT`
+- 8-bit integer : either one or zero, indicating if the channel shall be created if not found.
+- 32-bit integer : id of the target channel to join.
+
+#### `CH_DISCONNECT`
+- 32-bit integer : id of the target channel to leave.
+
+#### `CH_MESSAGE`
+- 32-bit integer : id of the target channel where the message will be sent.
+- Null terminated ASCII String : Max of 1000 bytes per message (1000 characteres).
+
+#### `CH_COMMAND`
+- 8-bit integer : operation identifier.
+  - 1 : change channel privacy
+  - 2 : promote member to moderator
+  - 3 : promote moderator do emperor
+  - 4 : invite a member
+  - 5 : kick member
+  - 6 : change channel name
+  - 7 : pin a message on the channel
+  - 8 : destroy server
+- Varies based on the operation : can be either a 32-bit integer or a Null terminated ASCII String.
+
 # Components Logic Overview
 
 ### Server

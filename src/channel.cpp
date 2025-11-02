@@ -2,8 +2,10 @@
 #include "server.hpp"
 #include "utilities.hpp"
 #include <algorithm>
+#include <cstring>
 #include <sstream>
-#include <string_view>
+#include <string>
+#include <vector>
 
 // * Enters the channel.
 // - Check if the MAXCAPACITY has been reached.
@@ -51,37 +53,45 @@ bool Channel::disconnect_member(const WeakClient &target) {
 
   target.lock()->leave_channel(this->id);
 
-  return true;
-}
-
-// * Changes the secret status of the channel
-// - Only the emperor can do this.
-bool Channel::change_privacy(const WeakClient &actor) {
-  if (actor.lock() == this->emperor.lock()) {
-    this->secret.exchange(!this->secret);
-    return true;
-  }
   return false;
 }
 
-// * Kicks a member from the chanel
-// - Only authority can do it
-// - Only the emperor can kick other moderators.
-bool Channel::kick_member(const WeakClient &actor, int target) {
-  if (this->is_authority(actor)) {
-    auto targetClient = std::find_if(
-        this->members.begin(), this->members.end(),
-        [&](const WeakClient member) { return member.lock()->id == target; });
-    if (targetClient == this->members.end())
-      return false;
+Channel::~Channel() {
+  std::ostringstream data;
+  auto server = this->server.lock();
+  data << static_cast<uint32_t>(this->id) << "server destroyed";
+  auto packet = create_response(0, DATAKIND::CH_COMMAND, data.str());
 
-    if (this->is_authority(*targetClient) &&
-        actor.lock() != this->emperor.lock())
-      return false;
-
-    return disconnect_member(*targetClient);
+  for (WeakClient pointer : this->members) {
+    auto client = pointer.lock();
+    client->leave_channel(this->id);
+    if (client->connected) {
+      server->threadPool->enqueue(
+          [packet, client]() { client->send_packet(packet); });
+    }
   }
-  return false;
+
+  std::cout << "channel destroyed" << std::endl;
+}
+
+std::string Channel::info() { return ""; }
+
+// UTILITIES
+
+// Creates a response packet from a string.
+Response Channel::create_broadcast_packet(DATAKIND type,
+                                          std::vector<char> data) {
+  auto response = create_response(this->packetIds, type, data);
+  this->packetIds.fetch_add(1);
+  return response;
+}
+
+// Creates a response packet for a CH_COMMAND request.
+Response Channel::create_broadcast_packet(COMMAND command, std::string data) {
+  std::vector<char> payload(data.size() + 1);
+  payload[0] = command;
+  std::memcpy(payload.data() + 1, data.data(), data.size());
+  return this->create_broadcast_packet(DATAKIND::CH_COMMAND, payload);
 }
 
 // Checks if the actor is a moderator or emperor
@@ -95,8 +105,41 @@ bool Channel::is_authority(const WeakClient &actor) {
   return it != this->moderators.end();
 }
 
-// * Invites a member
-// - id does in the invited vector.
+// CH_COMMAND HANDLERS
+
+// * Changes the secret status of the channel
+// - Only the emperor can do this.
+bool Channel::change_privacy(const WeakClient &actor) {
+  if (actor.lock() == this->emperor.lock()) {
+    this->secret.exchange(!this->secret);
+    return true;
+  }
+  return false;
+}
+
+// * Kicks a member from the chanel
+// - Only moderators can execute this command.
+// - Only the emperor can kick other moderators.
+bool Channel::kick_member(const WeakClient &actor, int target) {
+  if (this->is_authority(actor)) {
+    auto targetClient = std::find_if(
+        this->members.begin(), this->members.end(),
+        [&](const WeakClient member) { return member.lock()->id == target; });
+    if (targetClient == this->members.end())
+      return false;
+
+    if (this->is_authority(*targetClient) &&
+        actor.lock() != this->emperor.lock())
+      return false;
+    // * Changes the secret status of the channel
+
+    return disconnect_member(*targetClient);
+  }
+  return false;
+}
+
+// * Invites a member to the channel.
+// - If the channel is secret, only moderators can invite.
 bool Channel::invite_member(const WeakClient &actor, int target) {
   if (this->secret && !this->is_authority(actor))
     return false;
@@ -109,7 +152,8 @@ bool Channel::invite_member(const WeakClient &actor, int target) {
   return false;
 }
 
-// * Promote member into a moderator;
+// * Promote member into a moderator.
+// - Only the emperor can execute this command.
 bool Channel::promote_member(const WeakClient &actor, int target) {
   if (actor.lock() != this->emperor.lock() || this->moderators.size() == 5)
     return false;
@@ -122,6 +166,8 @@ bool Channel::promote_member(const WeakClient &actor, int target) {
   return true;
 }
 
+// * Promotes a moderator into the emperor
+// - Only the emperor can execute this command.
 bool Channel::promote_moderator(const WeakClient &actor, int target) {
   if (actor.lock() != this->emperor.lock() || this->moderators.size() == 0)
     return false;
@@ -139,22 +185,37 @@ bool Channel::promote_moderator(const WeakClient &actor, int target) {
   return true;
 }
 
-Channel::~Channel() {
-  std::ostringstream data;
-  auto server = this->server.lock();
-  data << static_cast<uint32_t>(this->id) << "server destroyed";
-  auto packet = create_response(0, DATAKIND::CH_DESTROY, data.str());
-
-  for (WeakClient pointer : this->members) {
-    auto client = pointer.lock();
-    client->leave_channel(this->id);
-    server->threadPool->enqueue(
-        [packet, client]() { client->send_packet(packet); });
+// * Pins a message on the server to be seen by all members.
+// - Only moderators can execute this command.
+// - The message will be broadcasted to the whole channel.
+bool Channel::pin_message(const WeakClient &actor, std::string message) {
+  if (this->is_authority(actor)) {
+    {
+      std::unique_lock lock(this->mtx);
+      this->pinnedMessage = message;
+    }
+    auto packet = this->create_broadcast_packet(COMMAND::PIN, message);
+    this->broadcast(packet);
+    return true;
   }
-  std::cout << "channel destroyed" << std::endl;
+
+  return false;
 }
 
-std::string Channel::info() { return ""; }
-// * Server cleanup will be done by sending a message to the clients and then
-// removing the channel from their channel pool
-void Channel::self_destroy(std::string_view reason) {}
+// * Changes the channel name.
+// - Only the emperor can execute this.
+// - The new name can have between 6-24 characters.
+// - The new name will be broadcasted to the whole channel.
+bool Channel::set_channel_name(const WeakClient &actor, std::string newName) {
+  if (this->emperor.lock() == actor.lock()) {
+    {
+      std::unique_lock lock(this->mtx);
+      this->name = newName;
+    }
+    auto packet = this->create_broadcast_packet(COMMAND::RENAME, newName);
+    this->broadcast(packet);
+    return true;
+  }
+
+  return false;
+}

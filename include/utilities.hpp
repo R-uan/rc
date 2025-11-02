@@ -15,7 +15,11 @@ enum DATAKIND {
   CH_DISCONNECT = 5,
   CH_MESSAGE = 6,
   CH_COMMAND = 7,
-  CH_DESTROY = 8
+};
+
+enum COMMAND {
+  RENAME = 6,
+  PIN = 7,
 };
 
 struct Response {
@@ -25,7 +29,9 @@ struct Response {
   std::vector<char> data{};
 };
 
+Response create_response(int id, int type, std::vector<uint32_t> data);
 Response create_response(int id, int type, const std::string_view data);
+Response create_response(int id, int type, const std::vector<char> data);
 
 struct Request {
   int id;
