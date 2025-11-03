@@ -12,7 +12,7 @@
 #include <vector>
 
 // Shared Pointer Tracker (Where a client shared_ptr can be found)
-// # RcServer
+// # Server
 //   -> client unordered map
 // # Channel
 //   -> chatter vector
@@ -24,7 +24,7 @@ struct Client {
   int id;
   std::mutex mtx;
   std::string username;
-  std::vector<int> channels{};
+  std::vector<uint32_t> channels{};
   std::atomic_bool connected{false};
 
   Client(int fd, int id) {
@@ -44,6 +44,7 @@ struct Client {
   void join_channel(const int channelId);
   void leave_channel(const int channelId);
   bool send_packet(const Response packet);
+  bool is_member(const int channelId);
 };
 
 typedef std::shared_ptr<Client> SharedClient;

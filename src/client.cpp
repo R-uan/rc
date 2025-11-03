@@ -1,4 +1,5 @@
-#include "relay_chat.hpp"
+#include "client.hpp"
+#include <algorithm>
 #include <mutex>
 #include <sys/socket.h>
 
@@ -19,4 +20,10 @@ bool Client::send_packet(const Response packet) {
     return false;
   }
   return true;
+}
+
+bool Client::is_member(const int channelId) {
+  return std::find_if(this->channels.begin(), this->channels.end(),
+                      [&](const int id) { return id == channelId; }) !=
+         this->channels.end();
 }

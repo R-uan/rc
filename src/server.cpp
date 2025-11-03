@@ -1,7 +1,6 @@
 #include "server.hpp"
 #include "channel.hpp"
-#include "relay_chat.hpp"
-#include "thread_pool.hpp"
+#include "client.hpp"
 #include "utilities.hpp"
 #include <cstdint>
 #include <iostream>
@@ -14,6 +13,7 @@
 #include <string_view>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -23,7 +23,7 @@
 //
 // * Handles new client connections and new incoming request from already
 // stablished clients.
-void RcServer::listen() {
+void Server::listen() {
   epoll_event events[50];
   while (true) {
     int nfds = epoll_wait(this->epollFd, events, 50, -1);
@@ -73,7 +73,7 @@ void RcServer::listen() {
 // be treated as connection request until the client is connected.
 // - After connection, pass requests down to their respective handlers and
 // send back a response.
-int RcServer::read_incoming(std::shared_ptr<Client> client) {
+int Server::read_incoming(std::shared_ptr<Client> client) {
   int packetSize = this->read_size(client);
   if (packetSize <= 0) {
     return -1;
@@ -138,63 +138,9 @@ int RcServer::read_incoming(std::shared_ptr<Client> client) {
   return 0;
 }
 
-// * The JOIN packet payload will be composed of: <flag> \n <channel> \n <token>
-//  - <flag>    : channel creation flag
-//  - <channel> : target channel's id (int) to join.
-//  - <token>   : invitation token (optional).
-Response RcServer::ch_connect(WeakClient &client, Request &request) {
-  auto pl = request.payload;
-  if (pl.size() < 5) {
-    return create_response(-1, DATAKIND::CH_CONNECT, "invalid packet");
-  }
-
-  bool flag = pl[0] == 1;
-  int channelId = i32_from_le({pl[1], pl[2], pl[3], pl[4]});
-  auto result = this->channels.find(static_cast<int>(channelId));
-
-  // * If the channel is not found on the server's channel pool:
-  // - Check the creation flag to decide if a new channel should be created.
-  // - If the flag is false or the server MAXCHANNELS number has been
-  // reached: return a not found packet
-  // - Otherwise create the new channel with the client as the emperor.
-  if (result == this->channels.end()) {
-    if (!flag || this->channels.size() == this->MAXCHANNELS) {
-      return create_response(-1, DATAKIND::CH_CONNECT, "does not exist");
-    } else {
-      int newChId = this->channelIds.load();
-      std::weak_ptr<Client> wClient = client;
-      std::weak_ptr<RcServer> wServer = weak_from_this();
-      this->channelIds.fetch_add(1);
-
-      auto newChannel = std::make_unique<Channel>(newChId, wClient, wServer);
-      std::string channelInfo(newChannel->info());
-
-      std::cout << "channel created (" << newChannel->name << ")" << std::endl;
-      {
-        auto sClient = client.lock();
-        std::unique_lock lock(sClient->mtx);
-        sClient->channels.push_back(newChannel->id);
-      }
-      {
-        std::unique_lock lock(this->channelMtx);
-        this->channels.emplace(newChannel->id, std::move(newChannel));
-      }
-      return create_response(request.id, DATAKIND::CH_CONNECT, channelInfo);
-    }
-  } else {
-    if (result->second->enter_channel(client)) {
-      auto info = result->second->info();
-      client.lock()->join_channel(channelId);
-      return create_response(request.id, DATAKIND::CH_CONNECT, info);
-    } else {
-      return create_response(-1, DATAKIND::CH_CONNECT, "can't join");
-    }
-  }
-}
-
 // * Reads the first four bytes on the file descriptor buffer to get the size of
 // the whole request.
-int RcServer::read_size(WeakClient pointer) {
+int Server::read_size(WeakClient pointer) {
   auto client = pointer.lock();
   std::vector<uint8_t> buffer{};
   buffer.resize(4);
@@ -208,7 +154,7 @@ int RcServer::read_size(WeakClient pointer) {
 }
 
 // * Adds a new client file descriptor to the epoll.
-void RcServer::add_client(int fd) {
+void Server::add_client(int fd) {
   epoll_event event;
   event.data.fd = fd;
   event.events = EPOLLIN | EPOLLONESHOT;
@@ -225,19 +171,19 @@ void RcServer::add_client(int fd) {
 // counter to zero.
 //
 // * Possible pointer locations:
-//    - RcServer: -> clients::unordered_map
+//    - Server: -> clients::unordered_map
 //    - Channel -> chatters::vector
 //    - Channel -> moderators::vector
 //    - Channel -> emperor::shared_ptr
-void RcServer::srv_disconnect(const WeakClient &wclient) {
+void Server::srv_disconnect(const WeakClient &wclient) {
   auto client = wclient.lock();
   client->connected.exchange(false);
 
   for (int id : client->channels) {
-    auto it = this->channels.find(id);
-    if (it != this->channels.end()) {
-      if (it->second->disconnect_member(client)) {
-        this->remove_channel(id);
+    auto channel = this->channels->find_channel(id);
+    if (channel != nullptr) {
+      if (channel->disconnect_member(client)) {
+        this->channels->remove_channel(id);
       }
     }
   }
@@ -246,27 +192,103 @@ void RcServer::srv_disconnect(const WeakClient &wclient) {
   this->clients.erase(client->fd);
 }
 
-void RcServer::remove_channel(uint32_t channelId) {
-  std::unique_lock lock(this->channelMtx);
-  this->channels.erase(channelId);
+// CHANNEL RELATED REQUEST HANDLERS
+
+// * Request to join a channel.
+// * The JOIN packet payload will be composed of: <flag> \n <channel> \n <token>
+//  - <flag>    : channel creation flag
+//  - <channel> : target channel's id (int) to join.
+//  - <token>   : invitation token (optional).
+Response Server::ch_connect(WeakClient &client, Request &request) {
+  auto body = request.payload;
+  if (body.size() < 5) {
+    return create_response(-1, DATAKIND::CH_CONNECT, "invalid packet");
+  }
+
+  bool flag = body[0] == 1;
+  int channelId = i32_from_le({body[1], body[2], body[3], body[4]});
+  auto channel = this->channels->find_channel(channelId);
+
+  // * If the channel is not found on the server's channel pool:
+  // - Check the creation flag to decide if a new channel should be created.
+  // - If the flag is false or the server MAXCHANNELS number has been
+  // reached: return a not found packet
+  // - Otherwise create the new channel with the client as the emperor.
+  if (channel == nullptr) {
+    if (flag && this->channels->has_capacity()) {
+      WeakClient weakClient = client;
+      std::weak_ptr<Server> weakServer = weak_from_this();
+      auto info = channels->create_channel(channelId, weakClient, weakServer);
+      return create_response(request.id, DATAKIND::CH_CONNECT, info);
+    }
+    return create_response(-1, DATAKIND::CH_CONNECT);
+  } else {
+    if (channel->enter_channel(client)) {
+      auto channelInfo = channel->info();
+      client.lock()->join_channel(channelId);
+      return create_response(request.id, DATAKIND::CH_CONNECT, channelInfo);
+    }
+    return create_response(-1, DATAKIND::CH_CONNECT);
+  }
 }
 
-Response RcServer::ch_disconnect(const WeakClient &client, Request &request) {
-  if (request.payload.size() < 4) {
-    return create_response(-1, DATAKIND::CH_DISCONNECT, {1});
+Response Server::ch_disconnect(const WeakClient &client, Request &request) {
+  if (request.payload.size() >= 4) {
+    auto pl = request.payload;
+    uint32_t channelId = i32_from_le({pl[0], pl[1], pl[2], pl[3]});
+    auto channel = this->channels->find_channel(channelId);
+
+    if (channel == nullptr) {
+      if (channel->disconnect_member(client)) {
+        this->channels->remove_channel(channelId);
+        return create_response(request.id, DATAKIND::CH_DISCONNECT);
+      }
+    }
   }
 
-  auto pl = request.payload;
-  uint32_t channelId = i32_from_le({pl[0], pl[1], pl[2], pl[3]});
-  auto channel = this->channels.find(channelId);
+  return create_response(-1, DATAKIND::CH_DISCONNECT);
+}
 
-  if (channel == this->channels.end()) {
-    return create_response(-1, DATAKIND::CH_DISCONNECT, {2});
+// * Sends message in a channel.
+// - Checks if the channel exists
+// - Checks if the client is in the channel.
+Response Server::ch_message(const WeakClient &client, Request &request) {
+  const auto body = request.payload;
+  const std::string message(body.begin() + 4, body.end());
+  const uint32_t channelId = i32_from_le({body[0], body[1], body[2], body[3]});
+  const auto channel = this->channels->find_channel(channelId);
+
+  if (channel != nullptr) {
+    if (client.lock()->is_member(channelId)) {
+      channel->send_message(client, message);
+      return create_response(request.id, DATAKIND::CH_MESSAGE);
+    }
   }
 
-  if (channel->second->disconnect_member(client)) {
-    this->remove_channel(channelId);
+  return create_response(-1, DATAKIND::CH_MESSAGE);
+}
+
+// * Maps command request to their respective handlers
+Response Server::ch_command(const WeakClient &client, Request &request) {
+  const auto body = request.payload;
+  const std::string message(body.begin() + 5, body.end());
+  const uint32_t channelId = i32_from_le({body[1], body[2], body[3], body[4]});
+  const auto channel = this->channels->find_channel(channelId);
+  const uint8_t commandId = body[0];
+
+  if (channel != nullptr) {
+    if (client.lock()->is_member(channelId)) {
+      switch (commandId) {
+      case COMMAND::RENAME:
+        channel->set_channel_name(client, message);
+        break;
+      case COMMAND::PIN:
+        channel->pin_message(client, message);
+        break;
+      }
+      return create_response(request.id, DATAKIND::CH_MESSAGE, "");
+    }
   }
 
-  return create_response(request.id, DATAKIND::CH_DISCONNECT, "");
+  return create_response(-1, DATAKIND::CH_MESSAGE);
 }

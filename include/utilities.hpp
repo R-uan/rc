@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+class Channel;
+
 int i32_from_le(const std::vector<uint8_t> bytes);
 std::vector<std::vector<uint8_t>> split_newline(std::vector<uint8_t> &data);
 enum DATAKIND {
@@ -29,9 +31,13 @@ struct Response {
   std::vector<char> data{};
 };
 
-Response create_response(int id, int type, std::vector<uint32_t> data);
-Response create_response(int id, int type, const std::string_view data);
-Response create_response(int id, int type, const std::vector<char> data);
+Response create_response(const int32_t id, const uint32_t type);
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::vector<uint32_t> data);
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::string_view data);
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::vector<char> data);
 
 struct Request {
   int id;

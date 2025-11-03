@@ -8,7 +8,8 @@ int i32_from_le(const std::vector<uint8_t> bytes) {
                           bytes[3] << 24);
 }
 
-Response create_response(int32_t id, int32_t type, std::string_view data) {
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::string_view data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -29,8 +30,50 @@ Response create_response(int32_t id, int32_t type, std::string_view data) {
   return packet;
 }
 
-Response create_response(int32_t id, uint32_t type,
-                         std::vector<uint32_t> data) {
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::vector<uint32_t> data) {
+  const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
+
+  std::vector<char> tempData(dataSize + 4);
+
+  std::memcpy(tempData.data() + 0, &dataSize, sizeof(dataSize));
+  std::memcpy(tempData.data() + 4, &id, sizeof(id));
+  std::memcpy(tempData.data() + 8, &type, sizeof(type));
+  std::memcpy(tempData.data() + 12, data.data(), data.size());
+  tempData.push_back('\x00');
+  tempData.push_back('\x00');
+
+  Response packet;
+  packet.id = id;
+  packet.size = dataSize;
+  packet.type = type;
+  packet.data = tempData;
+
+  return packet;
+}
+
+Response create_response(const int32_t id, const uint32_t type) {
+  const int32_t dataSize = static_cast<int32_t>(10);
+
+  std::vector<char> tempData(dataSize + 4);
+
+  std::memcpy(tempData.data() + 0, &dataSize, sizeof(dataSize));
+  std::memcpy(tempData.data() + 4, &id, sizeof(id));
+  std::memcpy(tempData.data() + 8, &type, sizeof(type));
+  tempData.push_back('\x00');
+  tempData.push_back('\x00');
+
+  Response packet;
+  packet.id = id;
+  packet.size = dataSize;
+  packet.type = type;
+  packet.data = tempData;
+
+  return packet;
+}
+
+Response create_response(const int32_t id, const uint32_t type,
+                         const std::vector<char> data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);

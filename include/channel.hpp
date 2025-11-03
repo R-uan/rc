@@ -2,17 +2,18 @@
 
 #include "utilities.hpp"
 #include <atomic>
-#include <iostream>
+#include <condition_variable>
 #include <memory>
-#include <sstream>
+#include <queue>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 class Client;
-class RcServer;
+class Server;
 struct Response;
 typedef std::weak_ptr<Client> WeakClient;
-typedef std::weak_ptr<RcServer> WeakServer;
+typedef std::weak_ptr<Server> WeakServer;
 
 // Each channel HAS an emperor and CAN HAVE up to five moderators.
 // - emperor : the one that created the channel by joining it first.
@@ -43,18 +44,25 @@ public:
   std::vector<WeakClient> members{};
   std::vector<WeakClient> moderators{};
 
+  std::mutex queueMutex;
+  std::condition_variable cv;
+  std::atomic_bool queueStatus{true};
+  std::queue<Response> messageQueue{};
+  std::thread messageQueueWorkerThread;
+
   void broadcast(Response packet);
+  bool send_message(const WeakClient &actor, std::string message);
 
   bool enter_channel(WeakClient actor);             // *
   bool disconnect_member(const WeakClient &target); // *
 
   // utils
-  std::string info();
+  std::vector<char> info();
   void self_destroy(std::string_view reason);  // *
   bool is_authority(const WeakClient &target); // *
 
-  Response create_broadcast_packet(DATAKIND type, std::vector<char> data);
-  Response create_broadcast_packet(COMMAND command, std::string data);
+  Response create_broadcast(DATAKIND type, std::vector<char> data);
+  Response create_broadcast(COMMAND command, std::string data);
 
   // CH_COMMAND HANDLERS (Implementations [7/7])
   bool change_privacy(const WeakClient &actor);
@@ -65,15 +73,7 @@ public:
   bool pin_message(const WeakClient &actor, std::string message);
   bool set_channel_name(const WeakClient &actor, std::string newName);
 
-  Channel(int id, WeakClient creator, WeakServer server)
-      : id(id), emperor(creator), server(server) {
-    std::ostringstream oss;
-    oss << '#' << "channel" << id;
-    this->name = oss.str();
-    this->members.push_back(creator);
-    std::cout << "channel [" << this->name << "] " << "was created"
-              << std::endl;
-  }
+  Channel(int id, WeakClient creator, WeakServer server);
 
   ~Channel();
 };
