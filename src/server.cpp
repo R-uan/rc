@@ -132,6 +132,7 @@ int Server::read_incoming(std::shared_ptr<Client> client) {
   }
 
   if (response.size > 0) {
+    std::cout << "size of " << sizeof(response.data);
     client->send_packet(response);
   }
 

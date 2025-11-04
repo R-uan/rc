@@ -112,7 +112,20 @@ Channel::~Channel() {
   std::cout << "channel destroyed" << std::endl;
 }
 
-std::vector<char> Channel::info() { return {}; }
+std::vector<char> Channel::info() {
+  uint32_t id = this->id;
+  std::string name = this->name;
+  uint8_t secret = this->secret ? 1 : 0;
+
+  std::vector<char> information;
+  information.reserve(5 + name.size());
+
+  std::memcpy(information.data(), &id, sizeof(id));
+  std::memcpy(information.data() + 4, &secret, 1);
+  std::memcpy(information.data() + 5, name.data(), name.size());
+
+  return information;
+}
 
 void Channel::broadcast(Response packet) {
   auto server = this->server.lock();

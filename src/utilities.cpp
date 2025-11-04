@@ -74,6 +74,7 @@ Response create_response(const int32_t id, const uint32_t type) {
 
 Response create_response(const int32_t id, const uint32_t type,
                          const std::vector<char> data) {
+  std::cout << "debug" << std::endl;
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -90,7 +91,6 @@ Response create_response(const int32_t id, const uint32_t type,
   packet.size = dataSize;
   packet.type = type;
   packet.data = tempData;
-
   return packet;
 }
 
