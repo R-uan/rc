@@ -37,8 +37,8 @@ struct Client {
   }
 
   ~Client() {
-    std::cout << this->username << " destroyed" << std::endl;
     close(this->fd);
+    std::cout << "[DEBUG] " << this->username << " destroyed" << std::endl;
   }
 
   void join_channel(const int channelId);

@@ -56,8 +56,8 @@ struct Client {
         std::vector<char> incoming;
         incoming.reserve(read);
         std::memcpy(incoming.data(), buffer, read);
+        std::cout << "[IN] received `" << read << "` bytes" << std::endl;
       }
-
       std::cout << "Exiting Recv Thread" << std::endl;
     });
   }
@@ -72,15 +72,15 @@ struct Client {
 int main() {
   Client bunny;
 
-  uint8_t CONN[]{0x0F, 0x00, 0x00, 0x00,            // size
-                 0x01, 0x00, 0x00, 0x00,            // id
-                 0x01, 0x00, 0x00, 0x00,            // type
-                 'b',  'u',  'n',  'n',  'y', 0x00, // payload
-                 0x00};
+  uint8_t SVR_CONN[]{0x0F, 0x00, 0x00, 0x00,            // size
+                     0x01, 0x00, 0x00, 0x00,            // id
+                     0x01, 0x00, 0x00, 0x00,            // type
+                     'b',  'u',  'n',  'n',  'y', 0x00, // payload
+                     0x00};
 
-  bunny.send_bytes(CONN, sizeof(CONN));
+  bunny.send_bytes(SVR_CONN, sizeof(SVR_CONN));
 
-  uint8_t JOIN[]{
+  uint8_t CH_JOIN[]{
       0x10, 0x00, 0x00, 0x00, // size
       0x03, 0x00, 0x00, 0x00, // id
       0x04, 0x00, 0x00, 0x00, // type
@@ -90,7 +90,34 @@ int main() {
       0x00 // null
   };
 
-  bunny.send_bytes(JOIN, sizeof(JOIN));
-  std::this_thread::sleep_for(std::chrono::seconds(60));
+  bunny.send_bytes(CH_JOIN, sizeof(CH_JOIN));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  uint8_t CH_MESSAGE[]{0x13, 0x00, 0x00, 0x00,            // size
+                       0x05, 0x00, 0x00, 0x00,            // id
+                       0x06, 0x00, 0x00, 0x00,            // type
+                       0x01, 0x00, 0x00, 0x00,            //
+                       'h',  'e',  'l',  'l',  'o', 0x00, // payload
+                       0x00};
+
+  bunny.send_bytes(CH_MESSAGE, sizeof(CH_MESSAGE));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  uint8_t CH_DISCO[]{
+      0x0E, 0x00, 0x00, 0x00, //
+      0x07, 0x00, 0x00, 0x00, //
+      0x05, 0x00, 0x00, 0x00, //
+      0x01, 0x00, 0x00, 0x00, //
+      0x00,                   //
+      0x00,                   //
+  };
+
+  bunny.send_bytes(CH_DISCO, sizeof(CH_DISCO));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  uint8_t SRV_DISCO[]{0x0A, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+                      0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+  bunny.send_bytes(SRV_DISCO, sizeof(SRV_DISCO));
   bunny.~Client();
 }

@@ -48,6 +48,34 @@ struct Request {
     this->id = i32_from_le({data[0], data[1], data[2], data[3]});
     this->type = i32_from_le({data[4], data[5], data[6], data[7]});
     this->payload = std::vector<uint8_t>(&data[8], &data[data.size() - 2]);
-    std::cout << "new request of type " << this->type << std::endl;
+    std::string typeString;
+    switch (type) {
+    case 1:
+      typeString = "SVR_CONNECT";
+      break;
+    case 2:
+      typeString = "SVR_DISCONNECT";
+      break;
+    case 3:
+      typeString = "SRV_MESSAGE";
+      break;
+    case 4:
+      typeString = "CH_CONNECT";
+      break;
+    case 5:
+      typeString = "CH_DISCONNECT";
+      break;
+    case 6:
+      typeString = "CH_MESSAGE";
+      break;
+    case 7:
+      typeString = "CH_COMMAND";
+      break;
+    default:
+      typeString = "INVALID";
+      break;
+    }
+
+    std::cout << "[DEBUG] new request [" << typeString << "]" << std::endl;
   }
 };

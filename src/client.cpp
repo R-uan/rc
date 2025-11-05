@@ -17,10 +17,8 @@ void Client::leave_channel(const int channelId) {
 bool Client::send_packet(const Response packet) {
   auto data = packet.data;
   if (send(this->fd, data.data(), data.size(), 0) == -1) {
-    std::cout << "could not send i guess" << std::endl;
     return false;
   }
-  std::cout << "send the packet " << sizeof(data) << std::endl;
   return true;
 }
 

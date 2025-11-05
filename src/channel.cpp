@@ -2,10 +2,12 @@
 #include "server.hpp"
 #include "utilities.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 // * Enters the channel.
@@ -52,7 +54,10 @@ bool Channel::disconnect_member(const WeakClient &target) {
     return mod.lock() == target.lock();
   });
 
+  auto client = target.lock();
   target.lock()->leave_channel(this->id);
+  std::cout << "[DEBUG] " << client->username << " disconnected from `"
+            << this->name << "`" << std::endl;
 
   return false;
 }
@@ -63,8 +68,7 @@ Channel::Channel(int id, WeakClient creator, WeakServer server)
   oss << '#' << "channel" << id;
   this->name = oss.str();
   this->members.push_back(creator);
-  std::cout << "channel [" << this->name << "] " << "was created" << std::endl;
-
+  std::cout << "[DEBUG] channel `" << this->name << "` created" << std::endl;
   this->messageQueueWorkerThread = std::thread([&, this]() {
     std::unique_lock lock(this->queueMutex);
     cv.wait(lock,
@@ -74,7 +78,8 @@ Channel::Channel(int id, WeakClient creator, WeakServer server)
 
     auto server = this->server.lock();
     server->threadPool->enqueue([&, this]() {
-      for (int i = 0; i < this->messageQueue.size(); i++) {
+      for (size_t i = 0; i < this->messageQueue.size(); i++) {
+        std::cout << "[DEBUG] " << "sending message" << std::endl;
         auto packet = this->messageQueue.front();
         for (auto member : this->members) {
           if (auto client = member.lock()) {
@@ -109,7 +114,7 @@ Channel::~Channel() {
     this->messageQueueWorkerThread.join();
   }
 
-  std::cout << "channel destroyed" << std::endl;
+  std::cout << "[DEBUG] " << this->name << " channel destroyed" << std::endl;
 }
 
 std::vector<char> Channel::info() {
@@ -152,6 +157,7 @@ bool Channel::send_message(const WeakClient &wclient, std::string message) {
   Response packet = this->create_broadcast(DATAKIND::CH_MESSAGE, payload);
   std::unique_lock lock(this->queueMutex);
   this->messageQueue.push(packet);
+  this->cv.notify_one();
   return true;
 }
 
@@ -188,6 +194,7 @@ bool Channel::is_authority(const WeakClient &actor) {
 // * Changes the secret status of the channel
 // - Only the emperor can do this.
 bool Channel::change_privacy(const WeakClient &actor) {
+  std::cout << "[DEBUG] " << this->name << " privacy changed" << std::endl;
   if (actor.lock() == this->emperor.lock()) {
     this->secret.exchange(!this->secret);
     return true;
@@ -210,7 +217,8 @@ bool Channel::kick_member(const WeakClient &actor, int target) {
         actor.lock() != this->emperor.lock())
       return false;
     // * Changes the secret status of the channel
-
+    std::cout << "[DEBUG] " << target << " kicked from " << this->name
+              << std::endl;
     return disconnect_member(*targetClient);
   }
   return false;
@@ -226,6 +234,8 @@ bool Channel::invite_member(const WeakClient &actor, int target) {
   if (newMember != server->clients.end()) {
     this->invitations.push_back(target);
     return true;
+    std::cout << "[DEBUG] " << target << " invited to " << this->name
+              << std::endl;
   }
   return false;
 }
@@ -241,6 +251,8 @@ bool Channel::promote_member(const WeakClient &actor, int target) {
   if (member == this->members.end())
     return false;
   this->moderators.push_back(*member);
+  std::cout << "[DEBUG] " << target << " promoted to mod in " << this->name
+            << std::endl;
   return true;
 }
 
@@ -261,6 +273,9 @@ bool Channel::promote_moderator(const WeakClient &actor, int target) {
   std::erase_if(this->moderators, [&](const WeakClient &client) {
     return client.lock()->id == target;
   });
+
+  std::cout << "[DEBUG] " << target << " promoted to emperor in " << this->name
+            << std::endl;
   return true;
 }
 
@@ -275,6 +290,7 @@ bool Channel::pin_message(const WeakClient &actor, std::string message) {
     }
     auto packet = this->create_broadcast(COMMAND::PIN, message);
     this->broadcast(packet);
+    std::cout << "[DEBUG] new message pinned in " << this->name << std::endl;
     return true;
   }
 
@@ -293,6 +309,7 @@ bool Channel::set_channel_name(const WeakClient &actor, std::string newName) {
     }
     auto packet = this->create_broadcast(COMMAND::RENAME, newName);
     this->broadcast(packet);
+    std::cout << "[DEBUG] name changed in " << this->name << std::endl;
     return true;
   }
 

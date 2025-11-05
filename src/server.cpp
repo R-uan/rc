@@ -32,7 +32,6 @@ void Server::listen() {
       if (fd == this->serverFd) {
         int ncfd = accept(this->serverFd, nullptr, nullptr);
         if (ncfd != -1) {
-          std::cout << "new client connected" << std::endl;
           this->add_client(ncfd);
         }
       } else {
@@ -94,7 +93,6 @@ int Server::read_incoming(std::shared_ptr<Client> client) {
     // Check if the max client capacity has been reached
     if (this->clients.size() >= this->MAXCLIENTS) {
       response = create_response(-3, DATAKIND::SVR_CONNECT, "server is full");
-      std::cout << "server max capacity has been reached" << std::endl;
     } else {
       if (request.type != DATAKIND::SVR_CONNECT) {
         response =
@@ -117,22 +115,29 @@ int Server::read_incoming(std::shared_ptr<Client> client) {
         this->clientIds.fetch_add(1);
         response =
             create_response(request.id, DATAKIND::SVR_CONNECT, handler.str());
+        std::cout << "[DEBUG] new client connected `" << username << "`"
+                  << std::endl;
       }
     }
   } else {
-    std::weak_ptr<Client> weakPtr = client;
+    std::weak_ptr<Client> wclient = client;
     switch (request.type) {
     case DATAKIND::CH_CONNECT:
-      response = this->ch_connect(weakPtr, request);
+      response = this->ch_connect(wclient, request);
       break;
     case DATAKIND::CH_DISCONNECT:
-      response = this->ch_disconnect(weakPtr, request);
+      response = this->ch_disconnect(wclient, request);
+      break;
+    case DATAKIND::SVR_DISCONNECT:
+      return -1;
+      break;
+    case DATAKIND::CH_MESSAGE:
+      response = this->ch_message(wclient, request);
       break;
     }
   }
 
   if (response.size > 0) {
-    std::cout << "size of " << sizeof(response.data);
     client->send_packet(response);
   }
 
@@ -191,6 +196,8 @@ void Server::srv_disconnect(const WeakClient &wclient) {
 
   std::unique_lock lock(this->clientMtx);
   this->clients.erase(client->fd);
+  std::cout << "[DEBUG] client disconnected [" << client->username << "]"
+            << std::endl;
 }
 
 // CHANNEL RELATED REQUEST HANDLERS
@@ -209,7 +216,6 @@ Response Server::ch_connect(WeakClient &client, Request &request) {
   bool flag = body[0] == 1;
   int channelId = i32_from_le({body[1], body[2], body[3], body[4]});
   auto channel = this->channels->find_channel(channelId);
-
   // * If the channel is not found on the server's channel pool:
   // - Check the creation flag to decide if a new channel should be created.
   // - If the flag is false or the server MAXCHANNELS number has been
@@ -226,7 +232,10 @@ Response Server::ch_connect(WeakClient &client, Request &request) {
   } else {
     if (channel->enter_channel(client)) {
       auto channelInfo = channel->info();
-      client.lock()->join_channel(channelId);
+      auto c = client.lock();
+      c->join_channel(channelId);
+      std::cout << "[DEBUG] " << c->username << " joined `" << channel->name
+                << "`" << std::endl;
       return create_response(request.id, DATAKIND::CH_CONNECT, channelInfo);
     }
     return create_response(-1, DATAKIND::CH_CONNECT);
@@ -238,8 +247,7 @@ Response Server::ch_disconnect(const WeakClient &client, Request &request) {
     auto pl = request.payload;
     uint32_t channelId = i32_from_le({pl[0], pl[1], pl[2], pl[3]});
     auto channel = this->channels->find_channel(channelId);
-
-    if (channel == nullptr) {
+    if (channel != nullptr) {
       if (channel->disconnect_member(client)) {
         this->channels->remove_channel(channelId);
         return create_response(request.id, DATAKIND::CH_DISCONNECT);
@@ -258,7 +266,6 @@ Response Server::ch_message(const WeakClient &client, Request &request) {
   const std::string message(body.begin() + 4, body.end());
   const uint32_t channelId = i32_from_le({body[0], body[1], body[2], body[3]});
   const auto channel = this->channels->find_channel(channelId);
-
   if (channel != nullptr) {
     if (client.lock()->is_member(channelId)) {
       channel->send_message(client, message);
