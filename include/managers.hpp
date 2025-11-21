@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
@@ -25,7 +26,7 @@ public:
   ChannelManager(int max) : MAXCHANNELS(max) {};
 
 private:
-  const int MAXCHANNELS;
+  const size_t MAXCHANNELS;
   std::shared_mutex mutex;
   std::unordered_map<uint32_t, std::unique_ptr<Channel>> channels;
 };

@@ -23,7 +23,14 @@ std::vector<char> ChannelManager::create_channel(uint32_t i, WeakClient c,
 
 void ChannelManager::remove_channel(uint32_t i) {
   std::unique_lock lock(this->mutex);
-  this->channels.erase(i);
+  std::cout << "remove" << std::endl;
+  std::cout << this->channels.size() << std::endl;
+  try {
+    this->channels.erase(i);
+  } catch (const std::exception &e) {
+    std::cerr << "Exception during erase: " << e.what() << std::endl;
+  }
+  std::cout << this->channels.size() << std::endl;
 }
 
 Channel *ChannelManager::find_channel(uint32_t i) const {

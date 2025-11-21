@@ -2,7 +2,6 @@
 #include "server.hpp"
 #include "utilities.hpp"
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -34,14 +33,13 @@ bool Channel::enter_channel(WeakClient actor) {
 bool Channel::disconnect_member(const WeakClient &target) {
   std::unique_lock lock(this->mtx);
   if (this->emperor.lock() == target.lock()) {
-    if (this->moderators.size() == 0) {
+    if (this->moderators.empty()) {
       return true;
     } else {
       auto newEmperor = this->moderators[0];
       this->moderators.erase(this->moderators.begin());
       this->emperor = newEmperor;
-      // The emperor is not stored in the members/moderators vector so we can
-      // just override him with the new emperor.
+      // TODO REMOVE EMPEROR FROM MOD/MEMBER
       return true;
     }
   }
@@ -107,21 +105,24 @@ Channel::Channel(int id, WeakClient creator, WeakServer server)
 Channel::~Channel() {
   std::ostringstream data;
   auto server = this->server.lock();
-  data << static_cast<uint32_t>(this->id) << "server destroyed";
+  data << this->name << "destroyed";
   auto packet = create_response(0, DATAKIND::CH_COMMAND, data.str());
 
   for (WeakClient pointer : this->members) {
-    auto client = pointer.lock();
-    client->leave_channel(this->id);
-    if (client->connected) {
-      server->threadPool->enqueue(
-          [packet, client]() { client->send_packet(packet); });
+    if (!pointer.expired()) {
+      auto client = pointer.lock();
+      client->leave_channel(this->id);
+      if (client->connected) {
+        server->threadPool->enqueue(
+            [packet, client]() { client->send_packet(packet); });
+      }
     }
   }
 
-  this->stopBroadcast.exchange(false);
+  this->stopBroadcast.exchange(true);
   this->cv.notify_all();
 
+  std::cout << "[DEBUG] About to join worker thread" << std::endl << std::flush;
   if (this->messageQueueWorkerThread.joinable()) {
     this->messageQueueWorkerThread.join();
   }
