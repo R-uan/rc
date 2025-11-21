@@ -3,6 +3,7 @@
 #include "utilities.hpp"
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <memory>
 #include <queue>
 #include <string_view>
@@ -32,8 +33,7 @@ public:
   std::mutex mtx;
   std::string name;
   WeakClient emperor;
-
-  const int MAXCAPACITY{50};
+  const size_t MAXCAPACITY{50};
 
   WeakServer server;
   std::atomic_int packetIds{1};
@@ -46,7 +46,7 @@ public:
 
   std::mutex queueMutex;
   std::condition_variable cv;
-  std::atomic_bool queueStatus{true};
+  std::atomic_bool stopBroadcast{false};
   std::queue<Response> messageQueue{};
   std::thread messageQueueWorkerThread;
 

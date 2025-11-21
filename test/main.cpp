@@ -71,7 +71,7 @@ struct Client {
 
 int main() {
   Client bunny;
-
+  // COnnects to the server
   uint8_t SVR_CONN[]{0x0F, 0x00, 0x00, 0x00,            // size
                      0x01, 0x00, 0x00, 0x00,            // id
                      0x01, 0x00, 0x00, 0x00,            // type
@@ -80,6 +80,7 @@ int main() {
 
   bunny.send_bytes(SVR_CONN, sizeof(SVR_CONN));
 
+  // connects to the channel
   uint8_t CH_JOIN[]{
       0x10, 0x00, 0x00, 0x00, // size
       0x03, 0x00, 0x00, 0x00, // id
@@ -93,16 +94,18 @@ int main() {
   bunny.send_bytes(CH_JOIN, sizeof(CH_JOIN));
   std::this_thread::sleep_for(std::chrono::seconds(2));
 
+  // sends a message on the channel
   uint8_t CH_MESSAGE[]{0x13, 0x00, 0x00, 0x00,            // size
                        0x05, 0x00, 0x00, 0x00,            // id
                        0x06, 0x00, 0x00, 0x00,            // type
-                       0x01, 0x00, 0x00, 0x00,            //
+                       0x01, 0x00, 0x00, 0x00,            // channel id
                        'h',  'e',  'l',  'l',  'o', 0x00, // payload
                        0x00};
 
   bunny.send_bytes(CH_MESSAGE, sizeof(CH_MESSAGE));
   std::this_thread::sleep_for(std::chrono::seconds(2));
 
+  // disconnects from the channel
   uint8_t CH_DISCO[]{
       0x0E, 0x00, 0x00, 0x00, //
       0x07, 0x00, 0x00, 0x00, //
@@ -112,6 +115,7 @@ int main() {
       0x00,                   //
   };
 
+  // disconnects from the server
   bunny.send_bytes(CH_DISCO, sizeof(CH_DISCO));
   std::this_thread::sleep_for(std::chrono::seconds(2));
 

@@ -69,26 +69,38 @@ Channel::Channel(int id, WeakClient creator, WeakServer server)
   this->name = oss.str();
   this->members.push_back(creator);
   std::cout << "[DEBUG] channel `" << this->name << "` created" << std::endl;
-  this->messageQueueWorkerThread = std::thread([&, this]() {
-    std::unique_lock lock(this->queueMutex);
-    cv.wait(lock,
-            [&]() { return !queueStatus || this->messageQueue.size() > 0; });
-    if (!queueStatus)
-      return;
+  this->messageQueueWorkerThread = std::thread([this]() {
+    while (!this->stopBroadcast) {
+      std::unique_lock lock(this->queueMutex);
+      this->cv.wait(lock, [this]() {
+        return this->stopBroadcast || !this->messageQueue.empty();
+      });
+      if (this->stopBroadcast)
+        return;
 
-    auto server = this->server.lock();
-    server->threadPool->enqueue([&, this]() {
-      for (size_t i = 0; i < this->messageQueue.size(); i++) {
-        std::cout << "[DEBUG] " << "sending message" << std::endl;
-        auto packet = this->messageQueue.front();
-        for (auto member : this->members) {
-          if (auto client = member.lock()) {
-            client->send_packet(packet);
+      auto server = this->server.lock();
+      if (!server)
+        return; // Server was destroyed
+
+      server->threadPool->enqueue([this]() {
+        std::vector<Response> messages_to_send;
+        {
+          std::unique_lock lock(this->queueMutex);
+          while (!this->messageQueue.empty()) {
+            messages_to_send.push_back(this->messageQueue.front());
+            this->messageQueue.pop();
           }
         }
-        this->messageQueue.pop();
-      }
-    });
+        for (const auto &packet : messages_to_send) {
+          std::cout << "[DEBUG] sending message" << std::endl;
+          for (auto member : this->members) {
+            if (auto client = member.lock()) {
+              client->send_packet(packet);
+            }
+          }
+        }
+      });
+    }
   });
 }
 
@@ -107,7 +119,7 @@ Channel::~Channel() {
     }
   }
 
-  this->queueStatus.exchange(false);
+  this->stopBroadcast.exchange(false);
   this->cv.notify_all();
 
   if (this->messageQueueWorkerThread.joinable()) {
