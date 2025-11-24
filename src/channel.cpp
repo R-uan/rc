@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <sys/types.h>
@@ -39,8 +40,12 @@ bool Channel::disconnect_member(const WeakClient &target) {
       auto newEmperor = this->moderators[0];
       this->moderators.erase(this->moderators.begin());
       this->emperor = newEmperor;
-      // TODO REMOVE EMPEROR FROM MOD/MEMBER
-      return true;
+
+      std::erase_if(this->members, [&](const WeakClient &member) {
+        return member.lock() == target.lock();
+      });
+
+      return false;
     }
   }
 
@@ -52,10 +57,8 @@ bool Channel::disconnect_member(const WeakClient &target) {
     return mod.lock() == target.lock();
   });
 
-  auto client = target.lock();
-  target.lock()->leave_channel(this->id);
-  std::cout << "[DEBUG] " << client->username << " disconnected from `"
-            << this->name << "`" << std::endl;
+  auto sclient = target.lock();
+  sclient->leave_channel(this->id);
 
   return false;
 }
@@ -76,28 +79,25 @@ Channel::Channel(int id, WeakClient creator, WeakServer server)
       if (this->stopBroadcast)
         return;
 
-      auto server = this->server.lock();
-      if (!server)
-        return; // Server was destroyed
-
-      server->threadPool->enqueue([this]() {
-        std::vector<Response> messages_to_send;
-        {
-          std::unique_lock lock(this->queueMutex);
-          while (!this->messageQueue.empty()) {
-            messages_to_send.push_back(this->messageQueue.front());
-            this->messageQueue.pop();
-          }
-        }
-        for (const auto &packet : messages_to_send) {
-          std::cout << "[DEBUG] sending message" << std::endl;
-          for (auto member : this->members) {
-            if (auto client = member.lock()) {
-              client->send_packet(packet);
+      if (!this->server.expired()) {
+        this->server.lock()->threadPool->enqueue([this]() {
+          std::vector<Response> messages_to_send;
+          {
+            std::unique_lock lock(this->queueMutex);
+            while (!this->messageQueue.empty()) {
+              messages_to_send.push_back(this->messageQueue.front());
+              this->messageQueue.pop();
             }
           }
-        }
-      });
+          for (const auto &packet : messages_to_send) {
+            for (auto member : this->members) {
+              if (auto client = member.lock()) {
+                client->send_packet(packet);
+              }
+            }
+          }
+        });
+      }
     }
   });
 }
@@ -106,7 +106,7 @@ Channel::~Channel() {
   std::ostringstream data;
   auto server = this->server.lock();
   data << this->name << "destroyed";
-  auto packet = create_response(0, DATAKIND::CH_COMMAND, data.str());
+  auto packet = c_response(0, DATAKIND::CH_COMMAND, data.str());
 
   for (WeakClient pointer : this->members) {
     if (!pointer.expired()) {
@@ -122,7 +122,6 @@ Channel::~Channel() {
   this->stopBroadcast.exchange(true);
   this->cv.notify_all();
 
-  std::cout << "[DEBUG] About to join worker thread" << std::endl << std::flush;
   if (this->messageQueueWorkerThread.joinable()) {
     this->messageQueueWorkerThread.join();
   }
@@ -178,7 +177,7 @@ bool Channel::send_message(const WeakClient &wclient, std::string message) {
 
 // Creates a response packet from a string.
 Response Channel::create_broadcast(DATAKIND type, std::vector<char> data) {
-  auto response = create_response(this->packetIds, type, data);
+  auto response = c_response(this->packetIds, type, data);
   this->packetIds.fetch_add(1);
   return response;
 }
@@ -243,8 +242,8 @@ bool Channel::invite_member(const WeakClient &actor, int target) {
   if (this->secret && !this->is_authority(actor))
     return false;
   auto server = this->server.lock();
-  auto newMember = server->clients.find(target);
-  if (newMember != server->clients.end()) {
+  auto newMember = server->clients->find_client(target);
+  if (newMember != std::nullopt) {
     this->invitations.push_back(target);
     return true;
     std::cout << "[DEBUG] " << target << " invited to " << this->name

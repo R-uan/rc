@@ -29,22 +29,20 @@ struct Client {
 
   Client(int fd, int id) {
     std::ostringstream username;
-    username << "user0" << fd;
-
+    username << "user0" << id;
     this->username = username.str();
     this->fd = fd;
     this->id = id;
   }
 
-  ~Client() {
-    close(this->fd);
-    std::cout << "[DEBUG] " << this->username << " destroyed" << std::endl;
-  }
+  ~Client() { close(this->fd); }
 
-  void join_channel(const int channelId);
-  void leave_channel(const int channelId);
-  bool send_packet(const Response packet);
+  void change_connection(bool b);
   bool is_member(const int channelId);
+  void join_channel(const int channelId);
+  bool send_packet(const Response packet);
+  void leave_channel(const int channelId);
+  std::string change_username(std::string username);
 };
 
 typedef std::shared_ptr<Client> SharedClient;

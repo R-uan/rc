@@ -10,6 +10,8 @@
 #include <vector>
 
 std::atomic<bool> flag(true);
+std::atomic<int> connectedClients(0);
+int totalClients = 0;
 
 struct Client {
   int fd;

@@ -8,8 +8,8 @@ int i32_from_le(const std::vector<uint8_t> bytes) {
                           bytes[3] << 24);
 }
 
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::string_view data) {
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::string_view data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -30,8 +30,8 @@ Response create_response(const int32_t id, const uint32_t type,
   return packet;
 }
 
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::vector<uint32_t> data) {
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::vector<uint32_t> data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -52,7 +52,7 @@ Response create_response(const int32_t id, const uint32_t type,
   return packet;
 }
 
-Response create_response(const int32_t id, const uint32_t type) {
+Response c_response(const int32_t id, const uint32_t type) {
   const int32_t dataSize = static_cast<int32_t>(10);
 
   std::vector<char> tempData(dataSize + 4);
@@ -72,8 +72,8 @@ Response create_response(const int32_t id, const uint32_t type) {
   return packet;
 }
 
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::vector<char> data) {
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::vector<char> data) {
   const int32_t dataSize = static_cast<int32_t>(data.size() + 10);
 
   std::vector<char> tempData(dataSize + 4);

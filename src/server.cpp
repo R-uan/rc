@@ -6,16 +6,15 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <shared_mutex>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 // * Utilises EPOLL to monitor new inputs on the server and client's file
@@ -24,6 +23,7 @@
 // * Handles new client connections and new incoming request from already
 // stablished clients.
 void Server::listen() {
+  std::cout << "[DEBUG] Server listening..." << std::endl;
   epoll_event events[50];
   while (true) {
     int nfds = epoll_wait(this->epollFd, events, 50, -1);
@@ -32,13 +32,28 @@ void Server::listen() {
       if (fd == this->serverFd) {
         int ncfd = accept(this->serverFd, nullptr, nullptr);
         if (ncfd != -1) {
-          this->add_client(ncfd);
+          if (this->clients->has_capacity()) {
+            epoll_event event;
+            event.data.fd = ncfd;
+            event.events = EPOLLIN | EPOLLONESHOT;
+            {
+              std::unique_lock lock(this->epollMtx);
+              epoll_ctl(this->epollFd, EPOLL_CTL_ADD, ncfd, &event);
+            }
+            this->clients->add_client(ncfd);
+          } else {
+            std::cout << "[DEBUG] Server client capacity full" << std::endl;
+            auto res = c_response(-3, DATAKIND::SVR_CONNECT, "server is full");
+            auto payload = res.data;
+            send(ncfd, payload.data(), payload.size(), 0);
+            continue;
+          }
         }
       } else {
         std::shared_lock lock(this->epollMtx);
-        auto result = this->clients.find(fd);
-        if (result != this->clients.end()) {
-          std::shared_ptr<Client> client = result->second;
+        auto find = this->clients->find_client(fd);
+        if (find != std::nullopt) {
+          std::shared_ptr<Client> client = find.value();
           this->threadPool->enqueue([this, client]() {
             int result = this->read_incoming(client);
             // * Result can be 0 or -1
@@ -88,36 +103,16 @@ int Server::read_incoming(std::shared_ptr<Client> client) {
   }
   Response response{};
   Request request(buffer);
-  // Check if the client has connected (sent their username)
   if (!client->connected) {
-    // Check if the max client capacity has been reached
-    if (this->clients.size() >= this->MAXCLIENTS) {
-      response = create_response(-3, DATAKIND::SVR_CONNECT, "server is full");
+    if (request.type != DATAKIND::SVR_CONNECT) {
+      response = c_response(-1, DATAKIND::SVR_CONNECT, "connection needed");
     } else {
-      if (request.type != DATAKIND::SVR_CONNECT) {
-        response =
-            create_response(-1, DATAKIND::SVR_CONNECT, "connection needed");
-      } else {
-        // Turns the payload into a string to get the username.
-        auto payload = request.payload;
-        std::string username(payload.begin(), payload.end());
-
-        // Adds the unique identifier to the username.
-        std::ostringstream handler;
-        handler << username << "@" << this->clientIds;
-        {
-          // Sets the user handler to the client.username
-          // and change client.connection state.
-          std::unique_lock lock(client->mtx);
-          client->username = handler.str();
-          client->connected.exchange(true);
-        }
-        this->clientIds.fetch_add(1);
-        response =
-            create_response(request.id, DATAKIND::SVR_CONNECT, handler.str());
-        std::cout << "[DEBUG] new client connected `" << username << "`"
-                  << std::endl;
-      }
+      auto payload = request.payload;
+      std::string name(payload.begin(), payload.end());
+      std::string newName = client->change_username(name);
+      response = c_response(request.id, DATAKIND::SVR_CONNECT, newName);
+      std::cout << "[DEBUG] New client: `" << newName << "`" << std::endl;
+      client->change_connection(true);
     }
   } else {
     std::weak_ptr<Client> wclient = client;
@@ -159,20 +154,6 @@ int Server::read_size(WeakClient pointer) {
   return i32_from_le(buffer);
 }
 
-// * Adds a new client file descriptor to the epoll.
-void Server::add_client(int fd) {
-  epoll_event event;
-  event.data.fd = fd;
-  event.events = EPOLLIN | EPOLLONESHOT;
-  {
-    std::unique_lock lock(this->epollMtx);
-    epoll_ctl(this->epollFd, EPOLL_CTL_ADD, fd, &event);
-  }
-  auto client = std::make_shared<Client>(fd, this->clientIds);
-  this->clients[fd] = std::move(client);
-  this->clientIds.fetch_add(1);
-}
-
 // * Removes the client accross the application by lowering the shared_ptr
 // counter to zero.
 //
@@ -182,21 +163,20 @@ void Server::add_client(int fd) {
 //    - Channel -> moderators::vector
 //    - Channel -> emperor::shared_ptr
 void Server::srv_disconnect(const WeakClient &wclient) {
-  auto client = wclient.lock();
-  client->connected.exchange(false);
+  auto sclient = wclient.lock();
+  sclient->connected.exchange(false);
 
-  for (int id : client->channels) {
+  for (int id : sclient->channels) {
     auto channel = this->channels->find_channel(id);
     if (channel != nullptr) {
-      if (channel->disconnect_member(client)) {
+      if (channel->disconnect_member(sclient)) {
         this->channels->remove_channel(id);
       }
     }
   }
 
-  std::unique_lock lock(this->clientMtx);
-  this->clients.erase(client->fd);
-  std::cout << "[DEBUG] client disconnected [" << client->username << "]"
+  this->clients->remove_client(sclient->fd);
+  std::cout << "[DEBUG] `" << sclient->username << "` disconnected from server."
             << std::endl;
 }
 
@@ -210,7 +190,7 @@ void Server::srv_disconnect(const WeakClient &wclient) {
 Response Server::ch_connect(WeakClient &client, Request &request) {
   auto body = request.payload;
   if (body.size() < 5) {
-    return create_response(-1, DATAKIND::CH_CONNECT, "invalid packet");
+    return c_response(-1, DATAKIND::CH_CONNECT, "invalid packet");
   }
 
   bool flag = body[0] == 1;
@@ -226,9 +206,9 @@ Response Server::ch_connect(WeakClient &client, Request &request) {
       WeakClient weakClient = client;
       std::weak_ptr<Server> weakServer = weak_from_this();
       auto info = channels->create_channel(channelId, weakClient, weakServer);
-      return create_response(request.id, DATAKIND::CH_CONNECT, info);
+      return c_response(request.id, DATAKIND::CH_CONNECT, info);
     }
-    return create_response(-1, DATAKIND::CH_CONNECT);
+    return c_response(-1, DATAKIND::CH_CONNECT);
   } else {
     if (channel->enter_channel(client)) {
       auto channelInfo = channel->info();
@@ -236,26 +216,30 @@ Response Server::ch_connect(WeakClient &client, Request &request) {
       c->join_channel(channelId);
       std::cout << "[DEBUG] " << c->username << " joined `" << channel->name
                 << "`" << std::endl;
-      return create_response(request.id, DATAKIND::CH_CONNECT, channelInfo);
+      return c_response(request.id, DATAKIND::CH_CONNECT, channelInfo);
     }
-    return create_response(-1, DATAKIND::CH_CONNECT);
+    return c_response(-1, DATAKIND::CH_CONNECT);
   }
 }
 
-Response Server::ch_disconnect(const WeakClient &client, Request &request) {
+// * Disconnects the client from the channel.
+// - If channel may be flagged for deletion.
+Response Server::ch_disconnect(const WeakClient &sclient, Request &request) {
   if (request.payload.size() >= 4) {
     auto pl = request.payload;
     uint32_t channelId = i32_from_le({pl[0], pl[1], pl[2], pl[3]});
     auto channel = this->channels->find_channel(channelId);
     if (channel != nullptr) {
-      if (channel->disconnect_member(client)) {
+      std::cout << "[DEBUG] " << sclient.lock()->username
+                << " disconnected from `" << channel->name << "`" << std::endl;
+      if (channel->disconnect_member(sclient)) {
         this->channels->remove_channel(channelId);
-        return create_response(request.id, DATAKIND::CH_DISCONNECT);
       }
+      return c_response(request.id, DATAKIND::CH_DISCONNECT);
     }
   }
 
-  return create_response(-1, DATAKIND::CH_DISCONNECT);
+  return c_response(-1, DATAKIND::CH_DISCONNECT);
 }
 
 // * Sends message in a channel.
@@ -269,11 +253,11 @@ Response Server::ch_message(const WeakClient &client, Request &request) {
   if (channel != nullptr) {
     if (client.lock()->is_member(channelId)) {
       channel->send_message(client, message);
-      return create_response(request.id, DATAKIND::CH_MESSAGE);
+      return c_response(request.id, DATAKIND::CH_MESSAGE);
     }
   }
 
-  return create_response(-1, DATAKIND::CH_MESSAGE);
+  return c_response(-1, DATAKIND::CH_MESSAGE);
 }
 
 // * Maps command request to their respective handlers
@@ -294,9 +278,9 @@ Response Server::ch_command(const WeakClient &client, Request &request) {
         channel->pin_message(client, message);
         break;
       }
-      return create_response(request.id, DATAKIND::CH_MESSAGE, "");
+      return c_response(request.id, DATAKIND::CH_MESSAGE, "");
     }
   }
 
-  return create_response(-1, DATAKIND::CH_MESSAGE);
+  return c_response(-1, DATAKIND::CH_MESSAGE);
 }

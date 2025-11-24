@@ -1,6 +1,7 @@
 #include "client.hpp"
 #include <algorithm>
 #include <mutex>
+#include <sstream>
 #include <sys/socket.h>
 
 void Client::join_channel(const int channelId) {
@@ -26,4 +27,14 @@ bool Client::is_member(const int channelId) {
   return std::find_if(this->channels.begin(), this->channels.end(),
                       [&](const int id) { return id == channelId; }) !=
          this->channels.end();
+}
+
+void Client::change_connection(bool b) { this->connected.exchange(b); }
+
+std::string Client::change_username(std::string username) {
+  std::ostringstream holder;
+  holder << username << "@" << this->id;
+  std::unique_lock lock(this->mtx);
+  this->username = holder.str();
+  return holder.str();
 }

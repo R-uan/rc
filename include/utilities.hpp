@@ -31,13 +31,13 @@ struct Response {
   std::vector<char> data{};
 };
 
-Response create_response(const int32_t id, const uint32_t type);
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::vector<uint32_t> data);
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::string_view data);
-Response create_response(const int32_t id, const uint32_t type,
-                         const std::vector<char> data);
+Response c_response(const int32_t id, const uint32_t type);
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::vector<uint32_t> data);
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::string_view data);
+Response c_response(const int32_t id, const uint32_t type,
+                    const std::vector<char> data);
 
 struct Request {
   int id;
@@ -75,7 +75,5 @@ struct Request {
       typeString = "INVALID";
       break;
     }
-
-    std::cout << "[DEBUG] new request [" << typeString << "]" << std::endl;
   }
 };

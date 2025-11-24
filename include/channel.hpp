@@ -46,9 +46,9 @@ public:
 
   std::mutex queueMutex;
   std::condition_variable cv;
-  std::atomic_bool stopBroadcast{false};
   std::queue<Response> messageQueue{};
   std::thread messageQueueWorkerThread;
+  std::atomic_bool stopBroadcast{false};
 
   void broadcast(Response packet);
   bool send_message(const WeakClient &actor, std::string message);
@@ -61,8 +61,8 @@ public:
   void self_destroy(std::string_view reason);  // *
   bool is_authority(const WeakClient &target); // *
 
-  Response create_broadcast(DATAKIND type, std::vector<char> data);
   Response create_broadcast(COMMAND command, std::string data);
+  Response create_broadcast(DATAKIND type, std::vector<char> data);
 
   // CH_COMMAND HANDLERS (Implementations [7/7])
   bool change_privacy(const WeakClient &actor);

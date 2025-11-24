@@ -77,7 +77,7 @@
     - [x] Channel Messaging [`CH_MESSAGE`]
     - [ ] Channel Commands [`CH_COMMAND`]
     - [x] Channel Disconnection [`CH_DISCONNECT`]
-- [ ] Test message broadcasting to multiple clients.
+- [x] Test message broadcasting to multiple clients.
 - [ ] Create a basic client ?
 - [ ] Optimize until you get tired.
 
