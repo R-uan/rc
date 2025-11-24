@@ -1,116 +1,209 @@
-## Packet Types 
-- `SRV_CONNECT`    : Initial connection to the server.
-- `SRV_DISCONNECT` : Disconnects from the server.
-- `SVR_MESSAGE`    : Server wide messages from the server to client.
-- `CH_CONNECT`     : Client attempts to connect to a channel.
-- `CH_DISCONNECT`  : Client disconnects from a channel.
-- `CH_MESSAGE`     : Client sends a message on the channel.
-- `CH_COMMAND`     : Channel management commands.
+# 💬 Chat Server Protocol & Architecture
 
-## Request/Response Packet Payload
+## Overview
 
-#### `SRV_CONNECT`
-###### Request
-- Null terminated string containing the client's desired username. 
-- The username may not exceed twelve characteres.
-###### Response
-- Null Terminated ASCII String : Mirror of the username plus their unique identifier.
+---
 
-#### `SRV_DISCONNECT` 
-###### Request
-- Null byte may suffice. The server will not read this request type's payload.
-###### Response
-- No response
+## Packet Types
 
-#### `SRV_MESSAGE`
-###### Request
-- 8-bit integer : Indicates the nature of the message (Info, Error, Annoucement)
-- Null-terminated ASCII String : Max of 1000 bytes per message (1000 characteres).
-###### Response
-- No response
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `SRV_CONNECT` | Client → Server | Initial connection and authentication |
+| `SRV_DISCONNECT` | Client → Server | Graceful disconnection |
+| `SRV_MESSAGE` | Server → Client | Server-wide notifications and messages |
+| `CH_CONNECT` | Client → Server | Join or create a channel |
+| `CH_DISCONNECT` | Client → Server | Leave a channel |
+| `CH_MESSAGE` | Client ↔ Server | Send/broadcast messages in a channel |
+| `CH_COMMAND` | Client → Server | Perform channel management operations |
 
-#### `CH_CONNECT`
-###### Request
-- 8-bit integer : either one or zero, indicating if the channel shall be created if not found.
-- 32-bit integer : id of the target channel to join.
-###### Response
-- 32-bit integer : channel's id
-- 32-bit integer : emperor's id
-- 8-bit integer  : secret status
+---
 
-#### `CH_DISCONNECT`
-###### Request
-- 32-bit integer : id of the target channel to leave.
-###### Response
-- Mirror of the request header.
+## 🔌 Protocol Specification
 
-#### `CH_MESSAGE`
-###### Request
-- 32-bit integer : id of the target channel where the message will be sent.
-- Null terminated ASCII String : Max of 1000 bytes per message (1000 characteres).
-###### Response
-- 32-bit integer : Channel identifier
-- 32-bit integer : Client identifier
-- Null-terminated ASCII String : broadcasted message
+### SRV_CONNECT
+Establishes a client connection and registers a username.
 
-#### `CH_COMMAND`
-- 8-bit integer : operation identifier.
-  - 1 : change channel privacy
-  - 2 : promote member to moderator
-  - 3 : promote moderator do emperor
-  - 4 : invite a member
-  - 5 : kick member
-  - 6 : change channel name
-  - 7 : pin a message on the channel
-  - 8 : destroy server
-- Varies based on the operation : can be either a 32-bit integer or a Null terminated ASCII String.
+**Request:**
+- Null-terminated ASCII string (max 12 characters): desired username
 
-## Checklist
-- [x] I/O Multiplexing for incoming requests and connections.
-- [x] Global thread pool to handle request handling and intensive I/O operations.
-- [x] Think about and documment request/responses types and body formatting.
-- [x] Architect and document application components, ownerships and connections.
-- [ ] Test basic functionalities.
-    - [x] Server Connection [`SRV_CONNECT`]
-    - [x] Server Disconnect [`SRV_DISCONNECT`]
-    - [x] Channel Connection [`CH_CONNECT`]
-    - [x] Channel Messaging [`CH_MESSAGE`]
-    - [ ] Channel Commands [`CH_COMMAND`]
-    - [x] Channel Disconnection [`CH_DISCONNECT`]
-- [x] Test message broadcasting to multiple clients.
-- [ ] Create a basic client ?
-- [ ] Optimize until you get tired.
+**Response:**
+- Null-terminated ASCII string: username + unique client identifier
 
-## Components Logic Overview
+---
 
-### Server
-The server is the main component of the structure of the application, it's the first point of contact with the clients' file descriptors. It holds shared pointers to the connected clients in order to create weak pointers that will be passed down to request handlers and other functionalities from server and channels. It also holds a unique pointer to all channels created, and will be the intermediary that will link the clients and the channels. 
+### SRV_DISCONNECT
+Terminates the connection gracefully.
 
-The server uses of epoll system to handle the connections simultaneously. Also contains a centralized thread pool that will be used across the application to handle operations concurrently.
+**Request:**
+- Null byte or empty payload
 
-Server holds unique pointers of [Channel] and shared pointers of [Client]
+**Response:**
+- None
 
-#### Request Handling
-Once a client's file descriptor has an event notified in the epoll, that file descriptor will not be notified in the event pool until it is rearmed. File descriptors are only rearmed once the server has finished handling it's former request, allowing the server to proccess one request at a time in order to avoid conflicts.
+---
+
+### SRV_MESSAGE
+Server sends notifications or messages to a client.
+
+**Request:**
+- 8-bit integer: message type (Info, Error, Announcement)
+- Null-terminated ASCII string (max 1000 bytes): message content
+
+**Response:**
+- None
+
+---
+
+### CH_CONNECT
+Join an existing channel or create a new one.
+
+**Request:**
+- 8-bit integer: creation flag (1 = create if not exists, 0 = join only)
+- 32-bit integer: target channel ID
+
+**Response:**
+- 32-bit integer: channel ID
+- 32-bit integer: emperor ID (channel creator)
+- 8-bit integer: privacy status (secret/public)
+
+---
+
+### CH_DISCONNECT
+Leave a channel.
+
+**Request:**
+- 32-bit integer: channel ID
+
+**Response:**
+- 32-bit integer: channel ID (mirror of request)
+
+---
+
+### CH_MESSAGE
+Send a message to a channel.
+
+**Request:**
+- 32-bit integer: target channel ID
+- Null-terminated ASCII string (max 1000 bytes): message content
+
+**Response:**
+- 32-bit integer: channel ID
+- 32-bit integer: sender client ID
+- Null-terminated ASCII string: broadcasted message
+
+---
+
+### CH_COMMAND
+Execute channel management operations.
+
+**Request:**
+- 8-bit integer: operation code
+  - `1`: Change channel privacy
+  - `2`: Promote member to moderator
+  - `3`: Promote moderator to emperor
+  - `4`: Invite a member
+  - `5`: Kick member
+  - `6`: Change channel name
+  - `7`: Pin a message
+  - `8`: Destroy server
+- Variable payload: 32-bit integer or null-terminated ASCII string (depends on operation)
+
+---
+
+## 🏗️ Architecture
+
+### 🖥️ Server
+The main component that manages all client connections and channels.
+
+**Responsibilities:**
+- Accepts and manages client connections via epoll
+- Routes requests to appropriate handlers
+- Manages the global thread pool for concurrent operations
+- Owns all channel instances and maintains client references
+
+**Key Properties:**
+- Uses epoll for efficient I/O multiplexing
+- One-request-at-a-time processing per client (sequential per FD)
+- Centralized thread pool for async operations
+- Owns unique pointers to channels
+- Owns shared pointers to clients
+
+**Request Handling:**
+File descriptors are only rearmed in the epoll event pool after the current request is fully processed. This ensures sequential request handling per client and prevents race conditions.
+
+---
 
 ### Client
-Clients are stateful data structures associated with file descriptors. They hold an id, an username and the connected channel pool. (There's not authentication for client connections [29/10/2025]).
+Stateless connection wrapper associated with a file descriptor.
 
-Client holds no pointers, it's a standalone structure.
+**Properties:**
+- Unique client ID
+- Username (max 12 characters)
+- Connected channels list
+- No authentication required (as of 10/29/2025)
+- Standalone data structure with no pointer ownership
+
+---
 
 ### Channel
-A channel is a chat-room that the clients can create and connect to. Each channel contains one emperor (the client that created the channel), up to five moderators (assigned by the emperor) and a max of one-hundred concurrent members.
+A chat room where clients can exchange messages with role-based permissions.
 
-Channel holds weak pointers of [Client] connected to it.
+**Properties:**
+- Unique channel ID
+- **Emperor**: The client who created the channel (1 per channel)
+- **Moderators**: Privileged members (max 5 per channel)
+- **Members**: Regular connected clients (max 100 per channel)
+- Privacy status (public/secret)
 
-### Components Connections
-- [Server] is a shared pointer. 
-    - Will be passed down as a weak pointer to [Channel] in order to request it's self destruction.
-- [Clients] is a shared pointer. 
-    - Will be passed down to [Server] and [Channel] functions to handle requests.
+**Relationships:**
+- Holds weak pointers to connected clients
+- Can request server self-destruction through weak server pointer
 
-- [Channel] is a unique pointer owned by [Server]
-    - Will only be accessed directly by the [Server] at [Client]'s request.
+---
 
-    
+## Component Relationships
 
+```
+Server (shared pointer)
+  ├─ Channels (unique pointers, owned by Server)
+  ├─ Clients (shared pointers)
+  └─ Thread Pool (global)
+
+Client (shared pointer)
+  └─ Passes as reference to Server and Channel handlers
+
+Channel (unique pointer)
+  └─ Holds weak pointers to Clients
+  └─ Holds weak pointer to Server (for thread-pool access)
+```
+
+---
+
+## Implementation Status
+
+### Completed
+- [x] I/O multiplexing with epoll
+- [x] Global thread pool for concurrent request handling
+- [x] Request/response protocol specification
+- [x] Architecture design and documentation
+- [x] Server connection handling (`SRV_CONNECT`)
+- [x] Server disconnection (`SRV_DISCONNECT`)
+- [x] Channel connection (`CH_CONNECT`)
+- [x] Channel messaging (`CH_MESSAGE`)
+- [x] Channel disconnection (`CH_DISCONNECT`)
+- [x] Multi-client message broadcasting
+
+### In Progress / Todo
+- [ ] Channel command operations (`CH_COMMAND`)
+- [ ] Basic client application
+- [ ] Performance optimization
+
+---
+
+## Technical Notes
+
+- **No Authentication**: Clients are identified only by username and ID
+- **Non-blocking**: All I/O operations are non-blocking via epoll
+- **Thread-safe**: Thread pool handles concurrent operations safely
+- **Sequential Processing**: Per-client request serialization prevents conflicts
+- **Memory Management**: Smart pointers ensure proper resource cleanup
